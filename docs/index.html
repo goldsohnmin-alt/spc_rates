@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>시공사 매출금리</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --muted:#6b6b70; --line:#e2e2e6; --head:#f5f5f7;
+          --warn:#fff3a8; --err-bg:#fdecec; --err:#b3261e; --accent:#1f5fbf; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17181a; --fg:#ececee; --muted:#a0a0a6; --line:#323438; --head:#212226;
+            --warn:#5a4d00; --err-bg:#3a1c1a; --err:#ff8a80; --accent:#7fb0ff; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg);
+         font:14px/1.5 -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); margin-bottom:12px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
+  select, button { font:inherit; padding:6px 10px; border:1px solid var(--line); border-radius:6px;
+                   background:var(--head); color:var(--fg); cursor:pointer; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  #msg { color:var(--muted); }
+  .errors { background:var(--err-bg); color:var(--err); border-radius:8px; padding:10px 12px; margin:12px 0; }
+  .wrap { overflow-x:auto; border:1px solid var(--line); border-radius:8px; }
+  table { border-collapse:collapse; min-width:100%; font-size:13px; }
+  th, td { border-bottom:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:var(--head); position:sticky; top:0; white-space:nowrap; }
+  td.num { text-align:right; white-space:nowrap; }
+  td.nowrap { white-space:nowrap; }
+  td.long { min-width:220px; }
+  td.warn { background:var(--warn); }
+  tr.uncertain td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+  .legend { color:var(--muted); font-size:12px; margin-top:8px; }
+  .legend span { background:var(--warn); padding:0 4px; border-radius:3px; }
+  .empty { padding:24px; color:var(--muted); text-align:center; }
+</style>
+</head>
+<body>
+<h1>시공사 매출금리</h1>
+<div class="sub">KOFIA 단기사채·ABCP 발행분 중 시공사 신용공여 건. 평가사(NICE·한국신용평가) 공개 자료로 자동 판정. <span id="updated"></span></div>
+<div id="errors"></div>
+<div class="bar">
+  <label>발행일 <select id="day"></select></label>
+  <button class="primary" id="copyP">장부용 A~P 복사</button>
+  <button id="copyQ">비고 포함 A~Q 복사</button>
+  <span id="msg"></span>
+</div>
+<div class="wrap"><table id="tbl"></table></div>
+<div class="legend"><span>노란 칸</span>은 확인이 필요한 값입니다(칸에 마우스를 올리면 사유). 체크를 끈 줄은 복사하지 않습니다. 복사는 머리글 없이 탭으로 구분됩니다.</div>
+
+<script>
+const COLS = [["A","회사명"],["B","종류"],["C","회차"],["D","기초자산"],["E","발행액"],["F","발행일"],["G","만기일"],
+  ["H","일수"],["I","주관회사"],["J","시공사"],["K","현재등급"],["L","발행금리"],["M","매출금리 하단"],
+  ["N","매출금리 상단"],["O","사업지"],["P","신용보강"],["Q","비고"]];
+let hist = {}, rows = [];
+
+const pct = v => v == null ? "" : (v * 100).toFixed(2) + "%";
+const show = (c, v) => v == null ? "" : (c === "M" || c === "N") ? pct(v) : String(v);
+// 엑셀 붙여넣기: 탭·줄바꿈·따옴표가 든 칸은 따옴표로 감싼다(칸 안 줄바꿈 유지)
+const cell = v => { if (v == null) return ""; const s = String(v);
+  return /[\t\n"]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+
+function render() {
+  const t = document.getElementById("tbl");
+  if (!rows.length) { t.innerHTML = '<tr><td class="empty">이 날짜에는 시공사 신용공여 발행이 없습니다.</td></tr>'; return; }
+  let h = "<thead><tr><th></th>" + COLS.map(([c, n]) => `<th>${c} ${n}</th>`).join("") + "</tr></thead><tbody>";
+  rows.forEach((r, i) => {
+    h += `<tr class="${r.verdict === "확인 필요" ? "uncertain" : ""}"><td><input type="checkbox" data-i="${i}" checked></td>`;
+    for (const [c] of COLS) {
+      const why = (r.checks || {})[c];
+      const cls = [why ? "warn" : "", "EHMN".includes(c) ? "num" : "", "ABCFGHIJK".includes(c) ? "nowrap" : "",
+                   "OPQ".includes(c) ? "long" : ""].join(" ");
+      const title = why ? ` title="${why.replace(/"/g, "&quot;")}"` : "";
+      const txt = show(c, r[c]).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\n/g, "<br>");
+      h += `<td class="${cls}"${title}>${txt}</td>`;
+    }
+    h += "</tr>";
+  });
+  t.innerHTML = h + "</tbody>";
+}
+
+async function copy(last) {
+  const keep = [...document.querySelectorAll("input[type=checkbox]")].filter(b => b.checked).map(b => rows[+b.dataset.i]);
+  const cols = COLS.map(([c]) => c).slice(0, last === "Q" ? 17 : 16);
+  const text = keep.map(r => cols.map(c => cell(r[c])).join("\t")).join("\n");
+  const msg = document.getElementById("msg");
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a);
+              a.select(); document.execCommand("copy"); a.remove(); }
+  msg.textContent = `${keep.length}줄 복사됨`;
+  setTimeout(() => msg.textContent = "", 3000);
+}
+
+async function main() {
+  const get = async f => { try { const r = await fetch(f, {cache: "no-store"}); return r.ok ? r.json() : null; } catch { return null; } };
+  const [data, h] = await Promise.all([get("data.json"), get("history.json")]);
+  hist = h || {};
+  if (data) {
+    document.getElementById("updated").textContent = `갱신 ${data.updated.replace("T", " ")}`;
+    if (data.errors && data.errors.length)
+      document.getElementById("errors").innerHTML = '<div class="errors">' +
+        data.errors.map(e => e.replace(/</g, "&lt;")).join("<br>") + "</div>";
+  }
+  const sel = document.getElementById("day");
+  const days = Object.keys(hist).sort().reverse();
+  sel.innerHTML = days.map(d => `<option>${d}</option>`).join("");
+  const pick = () => { rows = hist[sel.value] || []; render(); };
+  sel.onchange = pick;
+  pick();
+  document.getElementById("copyP").onclick = () => copy("P");
+  document.getElementById("copyQ").onclick = () => copy("Q");
+}
+main();
+</script>
+</body>
+</html>

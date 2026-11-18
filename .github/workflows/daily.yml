@@ -1,0 +1,43 @@
+name: spc-rates-daily
+on:
+  schedule:
+    - cron: "40 22 * * 0-4"     # 한국시간 월~금 07:40 (전 영업일 발행분)
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "밀린 날짜 채우기 시작일 (예 2026-11-03). 비워 두면 전 영업일 하루"
+        required: false
+        default: ""
+      end_date:
+        description: "채우기 종료일 (비우면 전 영업일까지)"
+        required: false
+        default: ""
+concurrency:
+  group: spc-rates            # 과거분 채우기와 동시에 돌지 않게
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Build rows for the previous business day
+        env:
+          START_DATE: ${{ github.event.inputs.start_date }}
+          END_DATE: ${{ github.event.inputs.end_date }}
+        run: python run_daily.py
+      - name: Commit results
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add docs state
+          git commit -m "update $(date -u +%F)" || echo "no changes"
+          git pull --rebase
+          git push

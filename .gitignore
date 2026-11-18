@@ -1,0 +1,15 @@
+# 민감 자료: 절대 커밋하지 않는다
+*.pdf
+*.xlsx
+*.xlsm
+*.xls
+data/
+output/
+
+# 파이썬 환경
+.venv/
+__pycache__/
+*.pyc
+
+# 작업 지시서(내부 정보 포함) - 공개 저장소에 올리지 않는다
+CLAUDE.local.md
