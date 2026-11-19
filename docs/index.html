@@ -41,9 +41,18 @@
 <div class="sub">KOFIA 단기사채·ABCP 발행분 중 시공사 신용공여 건. 평가사(NICE·한국신용평가) 공개 자료로 자동 판정. <span id="updated"></span></div>
 <div id="errors"></div>
 <div class="bar">
+  <button id="latest">가장 최근</button>
+  <button id="prev">그 전 영업일</button>
+  <label>기간 <select id="period">
+    <option value="">직접 선택</option>
+    <option value="7">일주일</option>
+    <option value="1m">한 달</option>
+    <option value="all">전체 기간</option>
+  </select></label>
   <label>발행일 <select id="from"></select></label>
   <label>~ <select id="to"></select></label>
-  <button id="one">하루만</button>
+</div>
+<div class="bar">
   <button class="primary" id="copyP">장부용 A~P 복사</button>
   <button id="copyQ">비고 포함 A~Q 복사</button>
   <span id="msg"></span>
@@ -116,9 +125,26 @@ async function main() {
     document.getElementById("msg").textContent = n > 1 ? `${n}일, ${rows.length}줄` : "";
     render();
   };
-  from.onchange = pick; to.onchange = pick;
-  document.getElementById("one").onclick = () => { from.value = to.value; pick(); };
-  pick();
+  const period = document.getElementById("period");
+  const setRange = (a, b) => { from.value = a; to.value = b; pick(); };
+  // 직접 날짜를 바꾸면 기간 선택은 '직접 선택'으로
+  from.onchange = to.onchange = () => { period.value = ""; pick(); };
+  // 가장 최근 / 그 전 영업일: 저장된 날짜 중 최신, 그 바로 앞 날짜 하루
+  document.getElementById("latest").onclick = () => { period.value = ""; setRange(days[0], days[0]); };
+  document.getElementById("prev").onclick = () => { period.value = ""; const d = days[1] || days[0]; setRange(d, d); };
+  // 기간: 가장 최근 날짜에서 일주일 / 한 달 전까지, 또는 저장된 전체
+  period.onchange = () => {
+    if (!days.length || !period.value) return;
+    const end = days[0], t = new Date(end + "T00:00:00");
+    if (period.value === "7") t.setDate(t.getDate() - 6);
+    else if (period.value === "1m") { t.setMonth(t.getMonth() - 1); t.setDate(t.getDate() + 1); }
+    const startStr = period.value === "all" ? days[days.length - 1]
+      : `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+    // 시작일은 저장된 날짜 중 startStr 이후 가장 이른 날
+    const start = days.filter(d => d >= startStr).pop() || end;
+    setRange(start, end);
+  };
+  setRange(days[0], days[0]);
   document.getElementById("copyP").onclick = () => copy("P");
   document.getElementById("copyQ").onclick = () => copy("Q");
 }
