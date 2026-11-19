@@ -42,24 +42,30 @@ def _num(s: str) -> float:
 
 
 def _site(text: str) -> tuple[str | None, str | None]:
-    """(사업지 문장, 출처) - '사업 개요' 표가 있으면 표, 없으면 '본 사업은 ...' 문장."""
+    """(사업지 문장, 출처) - '사업 개요' 표 -> '본 사업은 ...' 문장 -> '○○도 소재 ...사업' 순서."""
     m = re.search(r"사업\s*개요\s*\n(.*?)(?:\n시행|\n시공사|\n[^\n]*?(?:기초자산|차주|한편))", text, re.S)
     if m:
-        f = dict(re.findall(r"^(사업명|사업내용|사업부지)\s+(.+)$", m.group(1), re.M))
-        if f.get("사업부지") and f.get("사업명"):
-            site = f["사업부지"].strip()
-            words = f["사업명"].strip().split()
+        f = {k: v.strip() for k, v in re.findall(r"^(사업명|사업내용|사업부지|사업지|위치)\s+(.+)$", m.group(1), re.M)}
+        # 주소 칸 이름이 문서마다 다르다: 사업부지 / 사업지 / 위치(모니모용산제이차 2026-11-04)
+        site = f.get("사업부지") or f.get("사업지") or f.get("위치")
+        if site and f.get("사업명"):
+            words = f["사업명"].split()
             # 사업명 앞쪽의 지명이 사업부지에 이미 있으면 뺀다('하남 미사 오피스텔' -> '미사 오피스텔')
             while len(words) > 2 and words[0] in site:
                 words.pop(0)
             return f"{site} {' '.join(words)}", "표"
     flat = join_lines(text)
     m = re.search(r"본\s*(?:건\s*)?사업은\s*(.+?일원)\s*(?:의\s*부지)?(?:에서|에)\s*(.{2,80}?)(?:을|를)\s*"
-                  r"(개발|조성|신축|건축|재건축)하는", flat)
+                  r"(개발|조성|신축|건축|재건축)(?:하여\s*공급)?하는", flat)
     if m:
         what = re.sub(r"\(이하[^)]*\)", "", m.group(2))
         what = re.sub(r"\s*등$", "", what.strip())
         return f"{m.group(1)} {what} 등 {m.group(3)}사업", "문장"
+    # 주소 없이 지역만 적힌 문서(엠에프처인제일차: '경기도 소재에서 진행되는 개발사업')
+    m = re.search(r"([가-힣]+(?:특별시|광역시|특별자치시|특별자치도|도|시|군|구))\s*소재(?:에서|의)?\s*"
+                  r"(?:진행되는\s*|위치한\s*)?([가-힣 ]{0,20}?사업)", flat)
+    if m:
+        return f"{m.group(1)} 소재 {m.group(2).strip()}", "지역"
     return None, None
 
 

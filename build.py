@@ -202,7 +202,7 @@ class Builder:
         v["N"] = round(rr.high / 100, 6) if rr.high is not None else "-"
         notes = [n for n in rr.notes if not n.startswith("거래 없음")] + notes
         # O·P
-        if same_builder:
+        if same_builder and prior.values.get("O") and prior.values.get("P"):
             v["O"], v["P"] = prior.values["O"], prior.values["P"]
         else:
             v["O"] = site_text(nice, kis, v["D"])
