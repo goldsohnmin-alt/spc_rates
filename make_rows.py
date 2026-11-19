@@ -21,6 +21,20 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 COLS = "ABCDEFGHIJKLMNOPQ"
 
 
+# 평가사 조회 없이 바로 빼는 규칙 (2026-11-19 사용자 확정, 근거: 판정한 SPC 1,139개)
+NO_ASSETS = {"주식", "회사채", "신용카드채권", "정기예금"}   # 이 기초자산뿐인 SPC는 '예'가 한 번도 없었다
+YU_FROM = dt.date(2023, 1, 1)   # (유) 회사: 장부의 시공사 건은 2022-11 이 마지막
+
+
+def quick_no(issue, trades) -> str | None:
+    assets = {a for a in trades.get("asset", pd.Series(dtype=str)).dropna().astype(str) if a.strip()}
+    if assets and assets <= NO_ASSETS:
+        return f"제외 규칙: KOFIA 기초자산 {'·'.join(sorted(assets))}"
+    if "(유)" in str(issue["name"]) and issue["issue_date"] >= YU_FROM:
+        return "제외 규칙: 유한회사(유) SPC(2023년 이후)"
+    return None
+
+
 def business_days(a: dt.date, b: dt.date) -> list[dt.date]:
     return [a + dt.timedelta(n) for n in range((b - a).days + 1) if (a + dt.timedelta(n)).weekday() < 5]
 
@@ -40,8 +54,14 @@ def make(days: list[dt.date], builder: Builder | None = None, db: SpcDb | None =
         for n, i in enumerate(todo, 1):
             if n % 10 == 0:
                 print(f"  {n}/{len(todo)}", flush=True)
+            if db.skip(i["spc"], today):     # 같은 날 앞 회차에서 이미 '아니오'로 판정된 SPC면 바로 넘어간다
+                continue
             t = trades[(trades["kind"] == i["kind"]) & (trades["trade_date"] == d) & (trades["issue_date"] == d)
                        & (trades["maturity"] == i["maturity"]) & (trades["name"].map(norm_spc) == i["spc"])]
+            rule = quick_no(i, t)
+            if rule:          # 평가사를 보지 않아도 빠지는 건(사용자 확정 규칙)
+                db.put(i["spc"], i["name"], "아니오", None, rule, today)
+                continue
             o = builder.build(i, t)
             db.put(i["spc"], i["name"], o.verdict, o.values.get("J"), o.reason, today)
             if o.verdict == "아니오":

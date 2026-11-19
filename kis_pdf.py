@@ -12,9 +12,16 @@ import re
 
 import pdfplumber
 
+# 등급: A1~A3 외에 B+·C 등도 있다(2026-11-12 뉴스타트디엠 B+ (sf)). 취소는 WR.
+RATING = r"(?:[A-D][123]?[+-]?\s*\(sf\)|WR)"
+# 회차 표. 정기평가는 '직전등급 현재등급' 두 칸이 있다(노원제일차 2026-08-18) -> 뒤의 현재등급을 쓴다.
 SERIES_RE = re.compile(
-    r"(ABSTB|ABCP|전자단기사채|기업어음)\s+제\s*([\d-]+)\s*회(?:차)?\s+(A[123][+-]?)\s*\(sf\)\s+"
+    rf"(ABSTB|ABCP|전자단기사채|기업어음)\s+제\s*([\d-]+)\s*회(?:차)?\s+({RATING})\s+(?:({RATING})\s+)?"
     r"(\d[\d,]*(?:\.\d+)?)\s*억원\s+(\d{4}\.\d{2}\.\d{2})\s+(\d{4}\.\d{2}\.\d{2})")
+
+
+def _rating(s: str) -> str:
+    return re.sub(r"\s*\(sf\)", "", s).strip()
 
 
 def read_text(path: str, pages: int = 3) -> str:
@@ -60,9 +67,9 @@ def parse(text: str) -> dict:
     out = {}
     head = re.split(r"신용등급\s*기부여\s*내역|주요\s*평가요소", text)[0]
     out["series"] = [dict(kind={"전자단기사채": "ABSTB", "기업어음": "ABCP"}.get(m.group(1), m.group(1)),
-                          series=m.group(2), rating=m.group(3), amount=_num(m.group(4)),
-                          issue=m.group(5).replace(".", "-"), maturity=m.group(6).replace(".", "-"))
-                     for m in SERIES_RE.finditer(head)]
+                          series=m.group(2), rating=_rating(m.group(4) or m.group(3)), amount=_num(m.group(5)),
+                          issue=m.group(6).replace(".", "-"), maturity=m.group(7).replace(".", "-"))
+                     for m in SERIES_RE.finditer(head) if _rating(m.group(4) or m.group(3)) != "WR"]
     m = re.search(r"주요\s*평가요소(.*?)(유동화\s*개요|위험요인)", text, re.S)
     if m:
         bullets = re.split(r"•\s*", m.group(1))[1:]

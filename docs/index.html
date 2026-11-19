@@ -131,7 +131,14 @@ async function main() {
   from.onchange = to.onchange = () => { period.value = ""; pick(); };
   // 가장 최근 / 그 전 영업일: 저장된 날짜 중 최신, 그 바로 앞 날짜 하루
   document.getElementById("latest").onclick = () => { period.value = ""; setRange(days[0], days[0]); };
-  document.getElementById("prev").onclick = () => { period.value = ""; const d = days[1] || days[0]; setRange(d, d); };
+  // 누를 때마다 지금 보고 있는 날짜(기간이면 시작일)의 바로 앞 날짜로 한 칸씩 간다(daily-site와 같은 방식)
+  document.getElementById("prev").onclick = () => {
+    period.value = "";
+    const cur = [from.value, to.value].sort()[0];
+    const i = days.indexOf(cur);
+    const d = i >= 0 && i + 1 < days.length ? days[i + 1] : cur;
+    setRange(d, d);
+  };
   // 기간: 가장 최근 날짜에서 일주일 / 한 달 전까지, 또는 저장된 전체
   period.onchange = () => {
     if (!days.length || !period.value) return;

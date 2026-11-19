@@ -84,6 +84,20 @@ class Builder:
                 hits.append((t.find(b), form))
         return min(hits)[1] if hits else None
 
+    def _nice_says_no(self, res: dict) -> bool:
+        """NICE 문서만으로 '아니오'가 분명한가(그러면 한신평은 묻지 않는다).
+        NICE 조회에 실패했거나 근거 문서가 없거나 시공사가 보이면 False(한신평도 본다)."""
+        if res["errors"]:
+            return False
+        d = res["nice"]["match"] or res["nice"]["latest"]
+        if not d or not d.get("factors"):
+            return False
+        text = " / ".join(d["factors"])
+        if any(w in text for w in EXCLUDE_WORDS):
+            return True
+        extra = [d.get("builder")] + [r.get("시공사") for r in res["nice_table"] if isinstance(r.get("시공사"), str)]
+        return self.find_builder(text, extra) is None
+
     def ledger_arranger(self, s) -> str | None:
         if not s:
             return None
@@ -97,7 +111,7 @@ class Builder:
         prior = self.led.autofill(led_name, before_row) if led_name else None
         prior = prior if prior and prior.found else None
 
-        ev = self.ev.for_issue(name, kind, F, G)
+        ev = self.ev.for_issue(name, kind, F, G, skip_kis=self._nice_says_no)
         nice, kis = ev["nice"], ev["kis"]
         docs = [d for d in (nice["match"], kis["match"]) if d]
         if not docs:
@@ -151,6 +165,12 @@ class Builder:
             if pm:
                 v["C"] = f"제{int(pm.group(1)) + 1}회차"
                 chk["C"] = f"평가 문서 없음, 직전 회차({prior.values['C']})+1로 추정"
+            loose = nice.get("loose") or kis.get("loose")
+            if loose:
+                # 발행일이 같은 예정 회차가 있다(만기만 다름: 월 단위 예정 회차를 묶어 발행 등) -> 그 회차로
+                v["C"] = f"제{loose[0]['series']}회차"
+                chk["C"] = (f"평가 문서의 예정 회차표와 만기가 다름(예정 {loose[0]['maturity']}), "
+                            "발행일이 같은 회차로 채움")
             chk["E"] = "KOFIA 거래량으로 추정"
         # D
         if prior and prior.values.get("D"):
@@ -179,7 +199,8 @@ class Builder:
         # K: 이번 회차 평가등급(평가사) -> 없으면 KOFIA 등급. KOFIA 등급 열은 가끔 틀린다(2026-09-14 A2- 사례)
         rt = trades["rating"].dropna().astype(str)
         k_kofia = re.sub(r"\s*\(sf\)\s*", "", rt.mode().iloc[0]) if len(rt) else None
-        k_agency = [s["rating"] for s in (nice["series"] or []) + (kis["series"] or [])]
+        k_agency = [s["rating"] for s in (nice["series"] or nice.get("loose") or [])
+                    + (kis["series"] or kis.get("loose") or [])]
         v["K"] = k_agency[0] if k_agency else k_kofia
         if not v["K"]:
             chk["K"] = "등급 없음"

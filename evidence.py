@@ -53,36 +53,50 @@ class Evidence:
             self._kis = Kis()
         return self._kis
 
-    def listing(self, spc: str) -> dict:
-        """{'nice_table': [행...], 'docs': [{src, id, date, ...}]} (한 번 실행 안에서는 다시 묻지 않는다)."""
-        if spc in self._list_cache:
-            return self._list_cache[spc]
+    def listing(self, spc: str, sources=("nice", "kis")) -> dict:
+        """{'nice_table': [행...], 'docs': [{src, id, date, ...}], 'errors': [...]} - sources 의 평가사만 묻는다.
+        출처별로 따로 기억하므로(실행 안 + 오늘 받은 것은 디스크) 나중에 다른 출처를 더 물어도 다시 받지 않는다."""
+        out = {"nice_table": [], "docs": [], "errors": []}
+        for src in sources:
+            part = self._listing_src(spc, src)
+            out["nice_table"] += part.get("nice_table", [])
+            out["docs"] += part["docs"]
+            out["errors"] += part["errors"]
+        return out
+
+    def _listing_src(self, spc: str, src: str) -> dict:
+        key = f"{src}:{spc}"
+        if key in self._list_cache:
+            return self._list_cache[key]
         disk = self._load_lists()
-        hit = disk.get(spc)
-        if hit and hit["fetched"] == dt.date.today().isoformat():   # 오늘 받은 목록이면 다시 묻지 않는다
-            self._list_cache[spc] = hit["data"]
+        today = dt.date.today().isoformat()
+        hit = disk.get(key)
+        if hit and hit["fetched"] == today:      # 오늘 받은 목록이면 다시 묻지 않는다
+            self._list_cache[key] = hit["data"]
             return hit["data"]
         out = {"nice_table": [], "docs": [], "errors": []}
-        try:
-            t = self.nice.search_name(spc)
-            out["nice_table"] = t.drop(columns=[c for c in t.columns if c == "cmpCd"]).to_dict("records")
-            for cd in dict.fromkeys(t.get("cmpCd", [])):
-                for o in self.nice.opinions(cd):
-                    out["docs"].append(dict(src="nice", id=o["docId"], date=o["date"].replace(".", "-"),
-                                            series=o["series"], kind=o["kind"]))
-        except Exception as e:  # 한 곳이 실패해도 다른 곳으로 계속
-            out["errors"].append(f"NICE 조회 실패: {e}")
-        try:
-            code = self.kis.find_code(spc)
-            if code:
-                for s in self.kis.summaries(code):
-                    w = s["writedate"]
-                    out["docs"].append(dict(src="kis", id=s["fileName"], date=f"{w[:4]}-{w[4:6]}-{w[6:]}", item=s))
-        except Exception as e:
-            out["errors"].append(f"한신평 조회 실패: {e}")
-        self._list_cache[spc] = out
+        if src == "nice":
+            try:
+                t = self.nice.search_name(spc)
+                out["nice_table"] = t.drop(columns=[c for c in t.columns if c == "cmpCd"]).to_dict("records")
+                for cd in dict.fromkeys(t.get("cmpCd", [])):
+                    for o in self.nice.opinions(cd):
+                        out["docs"].append(dict(src="nice", id=o["docId"], date=o["date"].replace(".", "-"),
+                                                series=o["series"], kind=o["kind"]))
+            except Exception as e:  # 한 곳이 실패해도 다른 곳으로 계속
+                out["errors"].append(f"NICE 조회 실패: {e}")
+        else:
+            try:
+                code = self.kis.find_code(spc)
+                if code:
+                    for s in self.kis.summaries(code):
+                        w = s["writedate"]
+                        out["docs"].append(dict(src="kis", id=s["fileName"], date=f"{w[:4]}-{w[4:6]}-{w[6:]}", item=s))
+            except Exception as e:
+                out["errors"].append(f"한신평 조회 실패: {e}")
+        self._list_cache[key] = out
         if not out["errors"]:
-            disk[spc] = {"fetched": dt.date.today().isoformat(), "data": out}
+            disk[key] = {"fetched": today, "data": out}
             with open(LIST_CACHE, "w", encoding="utf-8") as f:
                 json.dump(disk, f, ensure_ascii=False, default=str)
         return out
@@ -115,15 +129,25 @@ class Evidence:
             json.dump(parsed, f, ensure_ascii=False)
         return parsed
 
-    def for_issue(self, spc: str, kind: str, issue, maturity) -> dict:
-        """출처별 {'match': 회차까지 맞는 문서, 'series': 맞는 회차 목록, 'latest': 최신 문서}."""
-        lst = self.listing(spc)
+    def for_issue(self, spc: str, kind: str, issue, maturity, skip_kis=None) -> dict:
+        """출처별 {'match': 회차까지 맞는 문서, 'series': 맞는 회차 목록, 'latest': 최신 문서, 'loose': 발행일만 같은 회차}.
+
+        NICE를 먼저 본다. skip_kis(res) 가 True 면(NICE 문서만으로 '아니오'가 분명) 한신평은 묻지 않는다.
+        처음 보는 SPC 확인이 거의 절반으로 준다(2026-11-19). 시공사 건이면 한신평까지 본다(P 문장 등).
+        """
         f, g = _ymd(issue), _ymd(maturity)
-        res = {"nice_table": lst["nice_table"], "errors": list(lst["errors"])}
+        empty = {"match": None, "series": None, "latest": None, "loose": None}
+        res = {"nice_table": [], "errors": [], "nice": dict(empty), "kis": dict(empty), "kis_skipped": False}
         for src in ("nice", "kis"):
+            if src == "kis" and skip_kis and skip_kis(res):
+                res["kis_skipped"] = True
+                break
+            lst = self.listing(spc, (src,))
+            res["nice_table"] += lst["nice_table"]
+            res["errors"] += lst["errors"]
             docs = sorted((d for d in lst["docs"] if d["src"] == src and d["date"] <= f),
                           key=lambda d: d["date"], reverse=True)
-            r = {"match": None, "series": None, "latest": None}
+            r = {"match": None, "series": None, "latest": None, "loose": None}
             for d in docs[:MAX_DOCS]:
                 try:
                     p = self.read(d)
@@ -134,13 +158,21 @@ class Evidence:
                     if msg not in res["errors"]:
                         res["errors"].append(msg)
                     continue
-                if not p or not p.get("factors"):   # 등급 취소 문서 등 근거가 없는 문서는 건너뛴다
+                if not p:
+                    continue
+                same_day = [s for s in p.get("series", []) if s["issue"] == f and s.get("kind") in (None, kind)]
+                # 만기가 같거나, 예정 만기가 휴일이라 며칠 밀린 경우(예정 11/29 -> 실제 12/01)는 같은 회차로 본다
+                hit = [s for s in same_day if abs((dt.date.fromisoformat(s["maturity"]) - dt.date.fromisoformat(g)).days) <= 4]
+                if hit and not r["series"]:
+                    r["series"] = hit
+                elif same_day and not r["series"] and not r["loose"]:
+                    # 발행일은 같은데 만기가 예정과 다름(월 단위 예정 회차를 묶어 3개월물로 발행 등) -> 회차만 참고
+                    r["loose"] = same_day
+                if not p.get("factors"):   # 등급 근거가 없는 문서(옛 형식·등급 취소)는 판정에 쓰지 않는다
                     continue
                 r["latest"] = r["latest"] or p
-                hit = [s for s in p.get("series", []) if s["issue"] == f and s["maturity"] == g
-                       and (s.get("kind") in (None, kind))]
                 if hit:
-                    r["match"], r["series"] = p, hit
+                    r["match"] = p
                     break
             res[src] = r
         return res

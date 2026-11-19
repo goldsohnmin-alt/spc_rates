@@ -88,8 +88,9 @@ def _dismiss_popup(driver):
         "if(b && b.offsetWidth){b.click(); return true;} return false;")
 
 
-def _wait_grid(driver, ymd: str, timeout=30):
-    """조회 뒤 표가 다 그려질 때까지 기다린다: 줄 수가 3번 연속 같고, 줄이 있으면 첫 줄 거래일이 맞아야 한다."""
+def _wait_grid(driver, ymd: str, timeout=90):
+    """조회 뒤 표가 다 그려질 때까지 기다린다: 줄이 있고, 줄 수가 3번 연속 같고, 첫 줄 거래일이 맞아야 한다.
+    0줄은 '아직 불러오는 중'으로 본다(영업일에 거래 0줄은 없다. 2026-11-19 로딩 중 0줄을 결과로 읽은 사례)."""
     end = time.time() + timeout
     last, same = None, 0
     time.sleep(2)
@@ -98,7 +99,7 @@ def _wait_grid(driver, ymd: str, timeout=30):
         n, first = driver.execute_script(
             "var g=WebSquare.util.getComponentById('grdMain');var n=g.getRowCount();"
             "return [n, n? g.getCellData(0,'val1') : null];")
-        ok = (n == 0) or (first == ymd)
+        ok = bool(n) and first == ymd
         same = same + 1 if (n == last and ok) else 0
         last = n
         if same >= 3:

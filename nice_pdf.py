@@ -15,8 +15,10 @@ from kis_pdf import join_lines, read_text as _read
 
 FIELDS = ["유동화구조", "기초자산", "본건 사업", "업무수탁자", "자산관리자", "주관회사", "법률자문기관",
           "자산보유자", "신용공여기관", "위탁자/수탁자", "주요 위험요소"]
+# 등급: A1~A3 외에 B+ 등도 있다(뉴스타트디엠제팔차 B+ (sf)). 정기평가는 '직전등급 평가등급' 두 칸 -> 뒤의 것.
+_R = r"([A-D][123]?[+-]?)\s*\(sf\)"
 SERIES_RE = re.compile(r"(?:제\s*)?([\d-]+)\s*회(?:차)?\s+(?:(ABSTB|ABCP|ABS)\s+)?(\d[\d,]*(?:\.\d+)?)\s+"
-                       r"(\d{4}\.\d{2}\.\d{2})\s+(\d{4}\.\d{2}\.\d{2})\s+(A[123][+-]?)\s*\(sf\)")
+                       rf"(\d{{4}}\.\d{{2}}\.\d{{2}})\s+(\d{{4}}\.\d{{2}}\.\d{{2}})\s+{_R}(?:\s+{_R})?")
 # '주요 평가근거는 아래와 같다.' (글자 사이에 줄바꿈이 끼어도 찾는다)
 FACTOR_HEAD = re.compile(r"\s*".join("주요평가근거는아래와같다") + r"\.\s*(.*?)(?=\n\s*유동화구조|\n\s*기초자산\s*\n|\Z)",
                          re.S)
@@ -42,7 +44,7 @@ def parse(text: str) -> dict:
     kind = None if both else ("ABCP" if "기업어음" in title else ("ABSTB" if "전자단기사채" in title else None))
     out["series"] = [dict(kind=m.group(2) or kind, series=m.group(1), amount=float(m.group(3).replace(",", "")),
                           issue=m.group(4).replace(".", "-"), maturity=m.group(5).replace(".", "-"),
-                          rating=m.group(6)) for m in SERIES_RE.finditer(head) if m.group(2) != "ABS"]
+                          rating=m.group(7) or m.group(6)) for m in SERIES_RE.finditer(head) if m.group(2) != "ABS"]
     for key, name in [("type", "유동화구조"), ("asset", "기초자산"), ("project", "본건 사업"),
                       ("arranger", "주관회사")]:
         v = _field(text, name)
