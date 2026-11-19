@@ -1,5 +1,5 @@
 {
-"updated": "2026-11-19T08:46+09:00",
+"updated": "2026-11-19T11:50+09:00",
 "latest_date": "2026-11-18",
 "rows": [
 {
@@ -19,7 +19,7 @@
 "N": 0.0401,
 "O": null,
 "P": null,
-"Q": null,
+"Q": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회); NICE 조회 실패: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
 "verdict": "확인 필요",
 "checks": {
 "C": "이번 회차 평가 문서를 못 찾음",
@@ -27,7 +27,7 @@
 "D": "유동화 유형 확인 필요",
 "I": "주관회사 확인 필요",
 "O": "사업지를 찾지 못함",
-"J": "시공사 신용공여 여부를 평가사 문서로 확인하지 못함"
+"J": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회)"
 }
 },
 {
@@ -47,7 +47,7 @@
 "N": 0.0402,
 "O": null,
 "P": null,
-"Q": null,
+"Q": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회); NICE 조회 실패: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
 "verdict": "확인 필요",
 "checks": {
 "C": "이번 회차 평가 문서를 못 찾음",
@@ -55,7 +55,7 @@
 "D": "유동화 유형 확인 필요",
 "I": "주관회사 확인 필요",
 "O": "사업지를 찾지 못함",
-"J": "시공사 신용공여 여부를 평가사 문서로 확인하지 못함"
+"J": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회)"
 }
 },
 {
@@ -75,7 +75,7 @@
 "N": 0.043,
 "O": null,
 "P": null,
-"Q": null,
+"Q": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회); NICE 조회 실패: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
 "verdict": "확인 필요",
 "checks": {
 "C": "이번 회차 평가 문서를 못 찾음",
@@ -83,7 +83,7 @@
 "D": "유동화 유형 확인 필요",
 "I": "주관회사 확인 필요",
 "O": "사업지를 찾지 못함",
-"J": "시공사 신용공여 여부를 평가사 문서로 확인하지 못함"
+"J": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회)"
 }
 },
 {
@@ -103,7 +103,7 @@
 "N": 0.0316,
 "O": null,
 "P": null,
-"Q": null,
+"Q": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회); NICE 조회 실패: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
 "verdict": "확인 필요",
 "checks": {
 "C": "이번 회차 평가 문서를 못 찾음",
@@ -111,9 +111,11 @@
 "D": "유동화 유형 확인 필요",
 "I": "주관회사 확인 필요",
 "O": "사업지를 찾지 못함",
-"J": "시공사 신용공여 여부를 평가사 문서로 확인하지 못함"
+"J": "평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회)"
 }
 }
 ],
-"errors": []
+"errors": [
+"평가사를 다시 조회할 날짜 17일(조회 실패 또는 최근 평가 문서 없음). 다음 실행 때 하루 최대 5일씩 자동으로 다시 조회합니다."
+]
 }
