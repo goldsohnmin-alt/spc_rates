@@ -202,7 +202,10 @@ class Builder:
         v["N"] = round(rr.high / 100, 6) if rr.high is not None else "-"
         notes = [n for n in rr.notes if not n.startswith("거래 없음")] + notes
         # O·P
-        if same_builder and prior.values.get("O") and prior.values.get("P"):
+        # 앞 줄 값이 비었거나 비정상적으로 길면(문서 본문이 섞인 값) 이어받지 않고 문서에서 다시 찾는다
+        ok_prior = (prior and prior.values.get("O") and prior.values.get("P")
+                    and len(prior.values["P"]) <= 150 and len(prior.values["O"]) <= 200)
+        if same_builder and ok_prior:
             v["O"], v["P"] = prior.values["O"], prior.values["P"]
         else:
             v["O"] = site_text(nice, kis, v["D"])

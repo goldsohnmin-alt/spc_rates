@@ -76,7 +76,10 @@ def parse(text: str) -> dict:
                           series=m.group(2), rating=_rating(m.group(4) or m.group(3)), amount=_num(m.group(5)),
                           issue=m.group(6).replace(".", "-"), maturity=m.group(7).replace(".", "-"))
                      for m in SERIES_RE.finditer(head) if _rating(m.group(4) or m.group(3)) != "WR"]
-    m = re.search(r"주요\s*평가요소(.*?)(유동화\s*개요|위험요인)", text, re.S)
+    # 주요 평가요소 글머리표가 끝나는 곳: 유동화 개요 / 위험요인 / (수시·정기평가 문서) '수시평가 사유'·'평가 사유'
+    # (2026-11-04 모니모용산제이차 수시평가: 마지막 근거 뒤에 '수시평가 사유' 본문이 통째로 붙었던 문제)
+    end = r"유동화\s*개요|위험요인|(?:수시|정기)?평가\s*사유"
+    m = re.search(rf"주요\s*평가요소(.*?)(?:{end})", text, re.S)
     if m:
         bullets = re.split(r"•\s*", m.group(1))[1:]
         # 각주 번호와 그 뒤 쪽머리(예: '... 채무인수 1 하이드인덕평제일차(주)')를 자른다
