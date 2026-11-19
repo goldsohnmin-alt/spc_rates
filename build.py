@@ -98,6 +98,22 @@ class Builder:
         extra = [d.get("builder")] + [r.get("시공사") for r in res["nice_table"] if isinstance(r.get("시공사"), str)]
         return self.find_builder(text, extra) is None
 
+    def checked_credit(self, p: str, builder: str) -> str | None:
+        """앞 줄 신용보강 문장 p 를 시공사 이름으로 확인한다.
+        - 시공사 이름이 그대로 있거나, 같은 회사의 다른 표기(예: 'DL건설㈜')면 그대로
+        - 이름이 한두 글자만 틀렸으면(장부 오타, 예: '아이파크현대산업개잘㈜') 고쳐서
+        - 그 밖(다른 회사 이름 등)은 None -> 평가 문서에서 다시 찾는다"""
+        b = bare(builder)
+        if b in bare(p):
+            return p
+        if any(bare(k) in bare(p) for k, v in BUILDER_ALIAS.items() if bare(v) == b):
+            return p
+        for m in re.finditer(r"㈜?([가-힣A-Za-z0-9]{2,})(?:㈜|\(주\))", ju(p)):
+            name = m.group(1)
+            if abs(len(name) - len(b)) <= 1 and len(b) >= 4 and _edit_distance(name, b) <= 2                     and (name[:2] == b[:2] or name[-2:] == b[-2:]):
+                return ju(p).replace(name, b, 1)
+        return None
+
     def ledger_arranger(self, s) -> str | None:
         if not s:
             return None
@@ -202,11 +218,14 @@ class Builder:
         v["N"] = round(rr.high / 100, 6) if rr.high is not None else "-"
         notes = [n for n in rr.notes if not n.startswith("거래 없음")] + notes
         # O·P
-        # 앞 줄 값이 비었거나 비정상적으로 길면(문서 본문이 섞인 값) 이어받지 않고 문서에서 다시 찾는다
-        ok_prior = (prior and prior.values.get("O") and prior.values.get("P")
-                    and len(prior.values["P"]) <= 150 and len(prior.values["O"]) <= 200)
-        if same_builder and ok_prior:
-            v["O"], v["P"] = prior.values["O"], prior.values["P"]
+        # 앞 줄 값이 비었거나 비정상적으로 길면(문서 본문이 섞인 값) 이어받지 않고 문서에서 다시 찾는다.
+        # 앞 줄 신용보강의 시공사 이름이 한두 글자 틀린 장부 오타면 고쳐서 쓰고, 판단이 안 되면 문서에서 다시 찾는다.
+        prior_p = None
+        if (same_builder and prior.values.get("O") and prior.values.get("P")
+                and len(prior.values["P"]) <= 150 and len(prior.values["O"]) <= 200):
+            prior_p = self.checked_credit(prior.values["P"], builder)
+        if prior_p:
+            v["O"], v["P"] = prior.values["O"], prior_p
         else:
             v["O"] = site_text(nice, kis, v["D"])
             kis_f = [f for d in (kis["match"] or kis["latest"],) if d for f in d.get("factors", [])]
@@ -226,6 +245,16 @@ class Builder:
             notes += ev["errors"]
         v["Q"] = "; ".join(notes) or None
         return o
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1]
 
 
 def asset_type(docs) -> str | None:
