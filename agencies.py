@@ -8,6 +8,7 @@
 - 한기평(KR): 보고서는 유료 서비스라고 안내한다. 사용하지 않는다.
 
 사이트 부담을 줄이려고 요청 사이에 PAUSE 초를 쉰다.
+해외 서버(GitHub Actions)에서는 NICE가 가끔 400·연결 끊김으로 거절한다(2026-11-19 확인) -> 쉬었다가 다시 시도한다.
 """
 from __future__ import annotations
 
@@ -18,8 +19,11 @@ import time
 import pandas as pd
 import requests
 
-PAUSE = 2.0
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+PAUSE = 3.0
+RETRY_WAITS = (15, 60, 180)   # 실패하면 이만큼(초) 쉬고 세션을 새로 만들어 다시 시도
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/130.0 Safari/537.36",
+      "Accept-Language": "ko-KR,ko;q=0.9"}
 
 
 def _bare(name: str) -> str:
@@ -29,18 +33,36 @@ def _bare(name: str) -> str:
     return re.sub(r"\s+", "", s)
 
 
-class Nice:
-    URL = "https://www.nicerating.com/disclosure/assetDetailSearch.do"
-
+class _Site:
     def __init__(self):
+        self.reset()
+
+    def reset(self):
         self.s = requests.Session()
         self.s.headers.update(UA)
 
+    def call(self, method: str, url: str, timeout: int = 30, **kw) -> requests.Response:
+        last = None
+        for wait in (0,) + RETRY_WAITS:
+            if wait:
+                time.sleep(wait)
+                self.reset()
+            try:
+                r = self.s.request(method, url, timeout=timeout, **kw)
+                r.raise_for_status()
+                time.sleep(PAUSE)
+                return r
+            except requests.RequestException as e:
+                last = e
+        raise last
+
+
+class Nice(_Site):
+    URL = "https://www.nicerating.com/disclosure/assetDetailSearch.do"
+
     def search_name(self, name: str) -> pd.DataFrame:
         """유동화회사명으로 검색. 이름이 정확히 같은 줄만 돌려준다(부분일치 제외)."""
-        r = self.s.get(self.URL, params={"searchType": "cmpNmCheck", "searchText": _bare(name)}, timeout=30)
-        r.raise_for_status()
-        time.sleep(PAUSE)
+        r = self.call("GET", self.URL, params={"searchType": "cmpNmCheck", "searchText": _bare(name)})
         codes = re.findall(r"goView\('[^']*',\s*'(\d+)',\s*'([^']*)'\)", r.text)
         for t in pd.read_html(io.StringIO(r.text)):
             cols = [str(c) for c in t.columns]
@@ -53,9 +75,8 @@ class Nice:
 
     def opinions(self, cmp_cd: str) -> list[dict]:
         """유동화회사 상세 화면의 ABSTB·ABCP 의견서 목록(공개 링크): docId, 회차, 종류, 등급확정일. 최신순."""
-        r = self.s.get("https://www.nicerating.com/disclosure/securitizationCompanyGrade.do",
-                       params={"cmpCd": cmp_cd, "seriesNm": ""}, timeout=30)
-        time.sleep(PAUSE)
+        r = self.call("GET", "https://www.nicerating.com/disclosure/securitizationCompanyGrade.do",
+                      params={"cmpCd": cmp_cd, "seriesNm": ""})
         out = []
         for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", r.text, re.S):
             doc = re.search(r"fncFileDown\('([\w-]+)'\)", tr)
@@ -68,8 +89,7 @@ class Nice:
         return sorted(out, key=lambda x: x["date"], reverse=True)
 
     def download(self, doc_id: str, path: str) -> bool:
-        r = self.s.get("https://www.nicerating.com/common/fileDown.do", params={"docId": doc_id}, timeout=60)
-        time.sleep(PAUSE)
+        r = self.call("GET", "https://www.nicerating.com/common/fileDown.do", params={"docId": doc_id}, timeout=60)
         if r.content[:4] != b"%PDF":
             return False
         with open(path, "wb") as f:
@@ -77,29 +97,28 @@ class Nice:
         return True
 
 
-class Kis:
+class Kis(_Site):
     BASE = "https://www.kisrating.com"
 
-    def __init__(self):
-        self.s = requests.Session()
-        self.s.headers.update(UA)
-        self.s.get(self.BASE + "/ratingsSearch/corp_search.do", timeout=30)
+    def reset(self):
+        super().reset()
+        try:
+            self.s.get(self.BASE + "/ratingsSearch/corp_search.do", timeout=30)
+        except requests.RequestException:
+            pass
 
     def find_code(self, name: str) -> str | None:
-        r = self.s.post(self.BASE + "/ratingsSearch/corp_presearch.json",
-                        data={"searchType": "1", "searchKeyword": _bare(name)}, timeout=30)
-        time.sleep(PAUSE)
-        d = r.json()
-        for x in d.get("dataList1") or []:
+        r = self.call("POST", self.BASE + "/ratingsSearch/corp_presearch.json",
+                      data={"searchType": "1", "searchKeyword": _bare(name)})
+        for x in r.json().get("dataList1") or []:
             if _bare(x.get("upcheOpt")) == _bare(name):
                 return x.get("kiscd")
         return None
 
     def summaries(self, code: str) -> list[dict]:
         """등급 탭의 Rating Summary 목록(최신순): fileName, writedate, title."""
-        self.s.post(self.BASE + "/ratingsSearch/corp_overview.do", data={"kiscd": code}, timeout=30)
-        r = self.s.post(self.BASE + "/ratingsSearch/search_corpTab1.json", data={"kiscd": code}, timeout=30)
-        time.sleep(PAUSE)
+        self.call("POST", self.BASE + "/ratingsSearch/corp_overview.do", data={"kiscd": code})
+        r = self.call("POST", self.BASE + "/ratingsSearch/search_corpTab1.json", data={"kiscd": code})
         out = []
         for m in re.finditer(r"fn_file\('R8',\s*'2',\s*'([^']*)',\s*'([^']+\.pdf)',\s*'Rating Summary',\s*'(\d{8})'\)", r.text):
             item = dict(title=m.group(1), fileName=m.group(2), writedate=m.group(3))
@@ -110,11 +129,10 @@ class Kis:
     def download(self, item: dict, path: str) -> bool:
         d = dict(fileName=item["fileName"], fileTitle=item["title"], menuCd="R8", gubun="2",
                  writedate=item["writedate"])
-        fee = self.s.post(self.BASE + "/checkFeeFile.json", data=d, timeout=30).json()
+        fee = self.call("POST", self.BASE + "/checkFeeFile.json", data=d).json()
         if fee.get("needLoginYn") != "N":  # 유료·로그인 필요 자료는 받지 않는다
             return False
-        r = self.s.post(self.BASE + "/fileDown.do", data=d, timeout=60)
-        time.sleep(PAUSE)
+        r = self.call("POST", self.BASE + "/fileDown.do", data=d, timeout=60)
         if r.content[:4] != b"%PDF":
             return False
         with open(path, "wb") as f:

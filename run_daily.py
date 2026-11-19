@@ -3,6 +3,8 @@
 - 평소: 전 영업일 하루.
 - START_DATE / END_DATE 환경변수: 그 기간(밀린 날짜 채우기).
 - BACKFILL_DAYS=N: 아직 안 채운 과거 영업일을 최근부터 거꾸로 N일 채운다(BACKFILL_FROM 까지, 기본 2024-11-18).
+- 어느 경우든, 평가사 조회 실패가 남은 날짜를 REDO_DAYS(기본 5)일까지 함께 다시 만든다.
+- RUN_MINUTES: 이 시간이 지나면 새 날짜를 시작하지 않고 저장한다(Actions 시간 제한 대비).
 결과(커밋됨):
   docs/history.json   날짜별 줄 목록(A~Q, 판정, 노란색 사유). 채운 날짜는 줄이 없어도 [] 로 남는다.
   docs/data.json      가장 최근 날짜의 줄 + errors(화면 위 빨간 상자)
@@ -69,7 +71,20 @@ def save_json(path, obj):
         json.dump(obj, f, ensure_ascii=False, indent=0)
 
 
+def failed_days(hist: dict) -> list[dt.date]:
+    """평가사 조회에 실패한 줄이 남은 날짜(최근 순). 다음 실행 때 다시 만든다."""
+    bad = [d for d, rows in hist.items() if any("조회 실패" in (r.get("Q") or "") for r in rows)]
+    return [dt.date.fromisoformat(d) for d in sorted(bad, reverse=True)]
+
+
 def target_days(hist: dict, hol) -> list[dt.date]:
+    days = _target_days(hist, hol)
+    redo = int(os.environ.get("REDO_DAYS", "5") or 0)
+    extra = [d for d in failed_days(hist) if d not in days][:redo]
+    return days + extra
+
+
+def _target_days(hist: dict, hol) -> list[dt.date]:
     today = dt.datetime.now(KST).date()
     s, e = os.environ.get("START_DATE", "").strip(), os.environ.get("END_DATE", "").strip()
     if s:
@@ -96,7 +111,14 @@ def main():
     builder = Builder(table)
     errors = []
     print("대상 날짜:", ", ".join(map(str, days)) or "없음", flush=True)
+    # GitHub Actions 시간 제한에 걸리면 결과가 커밋되지 않으므로, RUN_MINUTES 가 지나면 새 날짜를 시작하지 않는다.
+    limit = float(os.environ.get("RUN_MINUTES", "0") or 0)
+    started = dt.datetime.now()
     for d in days:
+        if limit and (dt.datetime.now() - started).total_seconds() > limit * 60:
+            left = [x.isoformat() for x in days if x >= d]
+            errors.append(f"시간 제한으로 {len(left)}일 남김({left[0]}~{left[-1]}). 남은 기간으로 다시 실행해 주세요.")
+            break
         try:
             df = make([d], builder=builder, db=db)
         except Exception as e:
@@ -115,6 +137,10 @@ def main():
         save_json(HIST, dict(sorted(hist.items())))
         table.save()
         builder = Builder(table)      # 새로 알게 된 SPC·시공사 반영
+    left = failed_days(hist)
+    if left:
+        errors.append(f"평가사 조회에 실패한 줄이 있는 날짜 {len(left)}일(노란 줄, 비고에 '조회 실패'). "
+                      f"다음 실행 때 하루 최대 {os.environ.get('REDO_DAYS', '5')}일씩 자동으로 다시 조회합니다.")
     latest = max(hist) if hist else None
     save_json(DATA, {"updated": dt.datetime.now(KST).isoformat(timespec="minutes"),
                      "latest_date": latest, "rows": hist.get(latest, []) if latest else [],
