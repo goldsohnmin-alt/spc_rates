@@ -20,7 +20,14 @@ import pandas as pd
 import requests
 
 PAUSE = 3.0
-RETRY_WAITS = (15, 60, 180)   # 실패하면 이만큼(초) 쉬고 세션을 새로 만들어 다시 시도
+RETRY_WAITS = (10, 30)        # 실패하면 이만큼(초) 쉬고 세션을 새로 만들어 다시 시도
+GIVE_UP_AFTER = 3             # 재시도까지 다 실패한 요청이 연달아 이만큼이면, COOL_DOWN 초 동안 그 사이트를 묻지 않는다
+COOL_DOWN = 600
+# (2026-11-19 Actions: NICE가 계속 거절하자 재시도 대기만 SPC당 4분 넘게 걸려 하루치에 30분 이상 소요)
+
+
+class SiteDown(requests.RequestException):
+    """연달아 실패해서 이번 실행에서는 건너뛰는 사이트. '조회 실패'로 기록되어 다음 실행 때 다시 조회된다."""
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/130.0 Safari/537.36",
       "Accept-Language": "ko-KR,ko;q=0.9"}
@@ -34,7 +41,11 @@ def _bare(name: str) -> str:
 
 
 class _Site:
+    NAME = "평가사"
+
     def __init__(self):
+        self.fails = 0          # 재시도까지 다 실패한 요청이 연달아 몇 번인지
+        self.down_until = 0.0   # 이 시각(time.time)까지는 묻지 않는다
         self.reset()
 
     def reset(self):
@@ -42,6 +53,8 @@ class _Site:
         self.s.headers.update(UA)
 
     def call(self, method: str, url: str, timeout: int = 30, **kw) -> requests.Response:
+        if time.time() < self.down_until:
+            raise SiteDown(f"{self.NAME} 사이트가 연달아 응답하지 않아 잠시 건너뜀")
         last = None
         for wait in (0,) + RETRY_WAITS:
             if wait:
@@ -51,13 +64,20 @@ class _Site:
                 r = self.s.request(method, url, timeout=timeout, **kw)
                 r.raise_for_status()
                 time.sleep(PAUSE)
+                self.fails = 0
                 return r
             except requests.RequestException as e:
                 last = e
+        self.fails += 1
+        if self.fails >= GIVE_UP_AFTER:
+            self.fails = 0
+            self.down_until = time.time() + COOL_DOWN
+            print(f"  ! {self.NAME} 연달아 실패 -> {COOL_DOWN // 60}분 동안 건너뜀 ({last})", flush=True)
         raise last
 
 
 class Nice(_Site):
+    NAME = "NICE"
     URL = "https://www.nicerating.com/disclosure/assetDetailSearch.do"
 
     def search_name(self, name: str) -> pd.DataFrame:
@@ -98,6 +118,7 @@ class Nice(_Site):
 
 
 class Kis(_Site):
+    NAME = "한신평"
     BASE = "https://www.kisrating.com"
 
     def reset(self):
