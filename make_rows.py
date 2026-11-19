@@ -45,6 +45,12 @@ def make(days: list[dt.date], builder: Builder | None = None, db: SpcDb | None =
             db.put(i["spc"], i["name"], o.verdict, o.values.get("J"), o.reason, today)
             if o.verdict == "아니오":
                 continue
+            if o.values.get("M") == "-":     # 그날 매출·매입 거래가 없으면 줄을 내지 않는다(사용자 2026-11-19)
+                continue
+            if o.verdict == "확인 필요" and "조회 실패" not in (o.values.get("Q") or ""):
+                # NICE·한신평 어디에도 평가 문서가 없는 건도 내지 않는다(사용자 2026-11-19).
+                # 조회 실패(접속 문제)는 남겨서 다음 실행 때 다시 조회한다.
+                continue
             rec = {c: o.values.get(c) for c in COLS}
             rec.update(verdict=o.verdict, reason=o.reason, checks=dict(o.check),
                        check="; ".join(f"{k}: {v}" for k, v in o.check.items()))

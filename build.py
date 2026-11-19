@@ -200,6 +200,9 @@ class Builder:
             v["P"] = credit_text(kis_f + factors, builder)
             if not v["O"]:
                 chk["O"] = "사업지를 찾지 못함"
+        if reason.startswith("평가사 문서 없음"):
+            # 이번 평가 문서가 없어 SPC 표(장부)의 옛 시공사로 채운 줄: 그사이 신용공여자가 바뀌었을 수 있다
+            chk["J"] = "이번 평가 문서가 없어 예전 시공사로 채움(신용공여자 변경 여부 확인)"
         if verdict == "확인 필요":
             failed = any("조회 실패" in e for e in ev["errors"])
             why = ("평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회)" if failed else
