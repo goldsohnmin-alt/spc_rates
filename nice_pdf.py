@@ -15,7 +15,7 @@ from kis_pdf import join_lines, read_text as _read
 
 FIELDS = ["유동화구조", "기초자산", "본건 사업", "업무수탁자", "자산관리자", "주관회사", "법률자문기관",
           "자산보유자", "신용공여기관", "위탁자/수탁자", "주요 위험요소"]
-SERIES_RE = re.compile(r"(?:제\s*)?([\d-]+)\s*회(?:차)?\s+(?:(ABSTB|ABCP|ABS)\s+)?([\d,.]+)\s+"
+SERIES_RE = re.compile(r"(?:제\s*)?([\d-]+)\s*회(?:차)?\s+(?:(ABSTB|ABCP|ABS)\s+)?(\d[\d,]*(?:\.\d+)?)\s+"
                        r"(\d{4}\.\d{2}\.\d{2})\s+(\d{4}\.\d{2}\.\d{2})\s+(A[123][+-]?)\s*\(sf\)")
 # '주요 평가근거는 아래와 같다.' (글자 사이에 줄바꿈이 끼어도 찾는다)
 FACTOR_HEAD = re.compile(r"\s*".join("주요평가근거는아래와같다") + r"\.\s*(.*?)(?=\n\s*유동화구조|\n\s*기초자산\s*\n|\Z)",

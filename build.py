@@ -188,11 +188,9 @@ class Builder:
         v["L"] = None
         # M·N
         rr = rate_range(trades)
-        v["M"] = round(rr.low / 100, 6) if rr.low is not None else None
-        v["N"] = round(rr.high / 100, 6) if rr.high is not None else None
-        notes = list(rr.notes) + notes
-        if rr.low is None:
-            chk["M"] = chk["N"] = "거래 없음"
+        v["M"] = round(rr.low / 100, 6) if rr.low is not None else "-"   # 거래 없음은 '-'(사용자 2026-11-19)
+        v["N"] = round(rr.high / 100, 6) if rr.high is not None else "-"
+        notes = [n for n in rr.notes if not n.startswith("거래 없음")] + notes
         # O·P
         if same_builder:
             v["O"], v["P"] = prior.values["O"], prior.values["P"]
@@ -203,7 +201,11 @@ class Builder:
             if not v["O"]:
                 chk["O"] = "사업지를 찾지 못함"
         if verdict == "확인 필요":
-            chk["J"] = "시공사 신용공여 여부를 평가사 문서로 확인하지 못함"
+            failed = any("조회 실패" in e for e in ev["errors"])
+            why = ("평가사 사이트 조회 실패로 판정 못 함(다음 실행 때 자동으로 다시 조회)" if failed else
+                   "NICE·한신평에 이번 발행의 평가 문서가 없음(한기평·서울신용평가만 평가했거나 아직 공시 전일 수 있음)")
+            chk["J"] = why
+            notes.insert(0, why)
         if ev["errors"]:
             notes += ev["errors"]
         v["Q"] = "; ".join(notes) or None

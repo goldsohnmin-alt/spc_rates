@@ -73,7 +73,10 @@ def save_json(path, obj):
 
 def failed_days(hist: dict) -> list[dt.date]:
     """평가사 조회에 실패한 줄이 남은 날짜(최근 순). 다음 실행 때 다시 만든다."""
-    bad = [d for d, rows in hist.items() if any("조회 실패" in (r.get("Q") or "") for r in rows)]
+    # 평가 문서가 없던 줄은 공시가 늦었을 수 있으니 7일 동안은 다시 본다
+    recent = (dt.datetime.now(KST).date() - dt.timedelta(7)).isoformat()
+    bad = [d for d, rows in hist.items()
+           if any("조회 실패" in (r.get("Q") or "") or (d >= recent and r.get("verdict") == "확인 필요") for r in rows)]
     return [dt.date.fromisoformat(d) for d in sorted(bad, reverse=True)]
 
 
@@ -139,8 +142,12 @@ def main():
         builder = Builder(table)      # 새로 알게 된 SPC·시공사 반영
     left = failed_days(hist)
     if left:
-        errors.append(f"평가사 조회에 실패한 줄이 있는 날짜 {len(left)}일(노란 줄, 비고에 '조회 실패'). "
+        errors.append(f"평가사를 다시 조회할 날짜 {len(left)}일(조회 실패 또는 최근 평가 문서 없음). "
                       f"다음 실행 때 하루 최대 {os.environ.get('REDO_DAYS', '5')}일씩 자동으로 다시 조회합니다.")
+    # PDF 읽기 실패는 다시 해도 같으므로(코드 수정 필요) 다시 돌리지 않고 알리기만 한다
+    unread = sorted({d for d in days if any("읽기 실패" in (r.get("Q") or "") for r in hist.get(d.isoformat(), []))})
+    if unread:
+        errors.append(f"평가사 PDF 읽기 실패가 있는 날짜: {', '.join(map(str, unread))} (프로그램 수정 필요)")
     latest = max(hist) if hist else None
     save_json(DATA, {"updated": dt.datetime.now(KST).isoformat(timespec="minutes"),
                      "latest_date": latest, "rows": hist.get(latest, []) if latest else [],

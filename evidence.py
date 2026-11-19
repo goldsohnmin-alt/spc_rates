@@ -13,6 +13,8 @@ import json
 import os
 import re
 
+import requests
+
 import kis_pdf
 import nice_pdf
 from agencies import Kis, Nice
@@ -126,7 +128,11 @@ class Evidence:
                 try:
                     p = self.read(d)
                 except Exception as e:
-                    res["errors"].append(f"{src} PDF 읽기 실패: {e}")
+                    # 내려받기(접속) 문제는 '조회 실패'(다음 실행 때 다시), PDF 내용 문제는 '읽기 실패'(코드 수정 필요)
+                    what = "조회 실패" if isinstance(e, requests.RequestException) else "읽기 실패"
+                    msg = f"{src} PDF {what}: {e}"
+                    if msg not in res["errors"]:
+                        res["errors"].append(msg)
                     continue
                 if not p or not p.get("factors"):   # 등급 취소 문서 등 근거가 없는 문서는 건너뛴다
                     continue

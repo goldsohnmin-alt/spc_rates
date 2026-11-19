@@ -57,7 +57,7 @@ const COLS = [["A","회사명"],["B","종류"],["C","회차"],["D","기초자산
   ["N","매출금리 상단"],["O","사업지"],["P","신용보강"],["Q","비고"]];
 let hist = {}, rows = [];
 
-const pct = v => v == null ? "" : (v * 100).toFixed(2) + "%";
+const pct = v => v == null ? "" : typeof v === "number" ? (v * 100).toFixed(2) + "%" : String(v);  // 거래 없음은 "-"
 const show = (c, v) => v == null ? "" : (c === "M" || c === "N") ? pct(v) : String(v);
 // 엑셀 붙여넣기: 탭·줄바꿈·따옴표가 든 칸은 따옴표로 감싼다(칸 안 줄바꿈 유지)
 const cell = v => { if (v == null) return ""; const s = String(v);

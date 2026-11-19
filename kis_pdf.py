@@ -14,7 +14,7 @@ import pdfplumber
 
 SERIES_RE = re.compile(
     r"(ABSTB|ABCP|전자단기사채|기업어음)\s+제\s*([\d-]+)\s*회(?:차)?\s+(A[123][+-]?)\s*\(sf\)\s+"
-    r"([\d,.]+)\s*억원\s+(\d{4}\.\d{2}\.\d{2})\s+(\d{4}\.\d{2}\.\d{2})")
+    r"(\d[\d,]*(?:\.\d+)?)\s*억원\s+(\d{4}\.\d{2}\.\d{2})\s+(\d{4}\.\d{2}\.\d{2})")
 
 
 def read_text(path: str, pages: int = 3) -> str:
