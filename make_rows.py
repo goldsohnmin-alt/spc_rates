@@ -30,7 +30,8 @@ def make(days: list[dt.date], builder: Builder | None = None, db: SpcDb | None =
     db = db or SpcDb()
     today = dt.date.today()
     trades = kofia.fetch_days(days)
-    trades = trades[trades["ab_type"].fillna("") != "일반"]
+    if "ab_type" in trades:     # ABCP 표에는 이 열이 없다
+        trades = trades[trades["ab_type"].fillna("") != "일반"]
     out = []
     for d in days:
         iss = issues_on(trades, d)

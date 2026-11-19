@@ -40,8 +40,27 @@ def _bare(name: str) -> str:
     return re.sub(r"\s+", "", s)
 
 
+# 이번 실행에서 NICE를 아예 묻지 않을 때 그 이유(run_daily 가 시작할 때 probe_nice 로 정한다)
+NICE_OFF = ""
+
+
+def probe_nice() -> bool:
+    """NICE에 딱 한 번 접속해 본다(재시도 없음). 막혀 있으면 이번 실행에서는 NICE를 묻지 않는다.
+    GitHub 서버가 NICE에 막혔을 때(2026-11-19) 계속 두드리면 차단이 길어질 수 있어서다."""
+    global NICE_OFF
+    try:
+        r = requests.get(Nice.URL, params={"searchType": "cmpNmCheck", "searchText": "제일차"}, headers=UA, timeout=20)
+        r.raise_for_status()
+        NICE_OFF = ""
+        return True
+    except requests.RequestException as e:
+        NICE_OFF = f"NICE 접속이 막혀 이번 실행에서는 NICE를 건너뜀({type(e).__name__})"
+        return False
+
+
 class _Site:
     NAME = "평가사"
+    PAUSE = PAUSE
 
     def __init__(self):
         self.fails = 0          # 재시도까지 다 실패한 요청이 연달아 몇 번인지
@@ -53,6 +72,8 @@ class _Site:
         self.s.headers.update(UA)
 
     def call(self, method: str, url: str, timeout: int = 30, **kw) -> requests.Response:
+        if self.NAME == "NICE" and NICE_OFF:
+            raise SiteDown(NICE_OFF)
         if time.time() < self.down_until:
             raise SiteDown(f"{self.NAME} 사이트가 연달아 응답하지 않아 잠시 건너뜀")
         last = None
@@ -63,7 +84,7 @@ class _Site:
             try:
                 r = self.s.request(method, url, timeout=timeout, **kw)
                 r.raise_for_status()
-                time.sleep(PAUSE)
+                time.sleep(self.PAUSE)
                 self.fails = 0
                 return r
             except requests.RequestException as e:
@@ -78,6 +99,7 @@ class _Site:
 
 class Nice(_Site):
     NAME = "NICE"
+    PAUSE = 5.0     # NICE는 더 천천히(한 번 막힌 적이 있다)
     URL = "https://www.nicerating.com/disclosure/assetDetailSearch.do"
 
     def search_name(self, name: str) -> pd.DataFrame:

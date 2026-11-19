@@ -157,6 +157,10 @@ def fetch_day(driver, kind: str, d: dt.date) -> pd.DataFrame:
             if got != ymd:
                 raise RuntimeError(f"KOFIA {kind} 날짜 입력 실패: {got!r} (원하는 값 {ymd})")
             _wait_grid(driver, ymd)
+            n = driver.execute_script("return WebSquare.util.getComponentById('grdMain').getRowCount();")
+            if not n:
+                # 영업일에 거래가 0줄일 수는 없다: 화면이 덜 불러온 것으로 보고 다시 한다(빈 결과는 저장하지 않는다)
+                raise RuntimeError(f"KOFIA {kind} {ymd} 결과가 0줄")
             break
         except (TimeoutError, RuntimeError) as e:
             last_err = e

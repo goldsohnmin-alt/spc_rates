@@ -4,6 +4,8 @@
 - START_DATE / END_DATE 환경변수: 그 기간(밀린 날짜 채우기).
 - BACKFILL_DAYS=N: 아직 안 채운 과거 영업일을 최근부터 거꾸로 N일 채운다(BACKFILL_FROM 까지, 기본 2024-11-18).
 - 어느 경우든, 평가사 조회 실패가 남은 날짜를 REDO_DAYS(기본 5)일까지 함께 다시 만든다.
+- REDO_ONLY=1: 다시 만들 날짜만 처리(PC 보충 실행 pc_fill.py 가 쓴다).
+- 시작할 때 NICE에 한 번 접속해 보고, 막혀 있으면 이번 실행에서는 NICE를 묻지 않는다.
 - RUN_MINUTES: 이 시간이 지나면 새 날짜를 시작하지 않고 저장한다(Actions 시간 제한 대비).
 결과(커밋됨):
   docs/history.json   날짜별 줄 목록(A~Q, 판정, 노란색 사유). 채운 날짜는 줄이 없어도 [] 로 남는다.
@@ -20,6 +22,7 @@ import math
 import os
 import traceback
 
+import agencies
 from build import Builder
 from make_rows import make
 from spc_db import SpcDb
@@ -71,23 +74,30 @@ def save_json(path, obj):
         json.dump(obj, f, ensure_ascii=False, indent=0)
 
 
-def failed_days(hist: dict) -> list[dt.date]:
-    """평가사 조회에 실패한 줄이 남은 날짜(최근 순). 다음 실행 때 다시 만든다."""
-    # 평가 문서가 없던 줄은 공시가 늦었을 수 있으니 7일 동안은 다시 본다
+def failed_days(hist: dict, nice_ok: bool = True) -> list[dt.date]:
+    """다시 만들 날짜(최근 순): 평가사 조회 실패 줄이 남은 날짜 + 최근 7일 안의 '평가 문서 없음' 줄이 있는 날짜.
+    nice_ok=False(이번 실행에서 NICE가 막힘)면 NICE 말고 다른 곳(한신평) 실패가 있는 날짜만 고른다."""
     recent = (dt.datetime.now(KST).date() - dt.timedelta(7)).isoformat()
-    bad = [d for d, rows in hist.items()
-           if any("조회 실패" in (r.get("Q") or "") or (d >= recent and r.get("verdict") == "확인 필요") for r in rows)]
+
+    def need(d, r):
+        q = r.get("Q") or ""
+        if not nice_ok:
+            return "한신평 조회 실패" in q or "kis PDF 조회 실패" in q
+        return "조회 실패" in q or (d >= recent and r.get("verdict") == "확인 필요")
+    bad = [d for d, rows in hist.items() if any(need(d, r) for r in rows)]
     return [dt.date.fromisoformat(d) for d in sorted(bad, reverse=True)]
 
 
-def target_days(hist: dict, hol) -> list[dt.date]:
-    days = _target_days(hist, hol)
+def target_days(hist: dict, hol, nice_ok: bool = True) -> list[dt.date]:
     redo = int(os.environ.get("REDO_DAYS", "5") or 0)
-    extra = [d for d in failed_days(hist) if d not in days][:redo]
+    if os.environ.get("REDO_ONLY") == "1":      # PC 보충 실행: 다시 만들 날짜만
+        return failed_days(hist, nice_ok)[:redo]
+    days = _target_days(hist, hol, nice_ok)
+    extra = [d for d in failed_days(hist, nice_ok) if d not in days][:redo]
     return days + extra
 
 
-def _target_days(hist: dict, hol) -> list[dt.date]:
+def _target_days(hist: dict, hol, nice_ok: bool = True) -> list[dt.date]:
     today = dt.datetime.now(KST).date()
     s, e = os.environ.get("START_DATE", "").strip(), os.environ.get("END_DATE", "").strip()
     if s:
@@ -103,13 +113,20 @@ def _target_days(hist: dict, hol) -> list[dt.date]:
                 out.append(d)
             d = prev_bday(d, hol)
         return out
-    return [prev_bday(today, hol)]
+    d = prev_bday(today, hol)
+    # 평일 아침 여러 번(06:00·06:30·07:00) 돌므로, 이미 문제없이 만든 날짜면 다시 하지 않는다
+    if d.isoformat() in hist and d not in failed_days(hist, nice_ok):
+        print(f"{d} 은 이미 만들어져 있어 건너뜁니다.", flush=True)
+        return []
+    return [d]
 
 
 def main():
     hol = holidays()
     hist = load_json(HIST, {})
-    days = target_days(hist, hol)
+    nice_ok = agencies.probe_nice()
+    print("NICE 접속:", "정상" if nice_ok else agencies.NICE_OFF, flush=True)
+    days = target_days(hist, hol, nice_ok)
     table, db = SpcTable.load(), SpcDb()
     builder = Builder(table)
     errors = []
@@ -140,6 +157,8 @@ def main():
         save_json(HIST, dict(sorted(hist.items())))
         table.save()
         builder = Builder(table)      # 새로 알게 된 SPC·시공사 반영
+    if not nice_ok:
+        errors.append(agencies.NICE_OFF + ". NICE가 필요한 줄은 노란색으로 남고, PC 보충 실행이나 다음 실행 때 채워집니다.")
     left = failed_days(hist)
     if left:
         errors.append(f"평가사를 다시 조회할 날짜 {len(left)}일(조회 실패 또는 최근 평가 문서 없음). "
