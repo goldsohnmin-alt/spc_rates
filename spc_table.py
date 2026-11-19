@@ -49,6 +49,7 @@ class SpcTable:
         f = Fill(found=True)
         f.values = {c: r.get(c) for c in FIELDS}
         f.values["C"] = r.get("C")
+        f.values["date"] = r.get("date")   # 이 정보가 나온 발행일(과거 날짜를 채울 때 '직전 회차'인지 확인용)
         f.values["D"] = None          # 기초자산은 평가사 문서에서 정한다
         return f
 

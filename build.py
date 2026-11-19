@@ -146,7 +146,9 @@ class Builder:
         v["A"] = led_name or ju(name)
         v["B"] = kind
         # C·E: 회차·발행금액(이번 회차 문서)
-        series = (nice["series"] or kis["series"] or [])
+        # C·E: 평가 문서 회차표에서(사용자 2026-11-19: 회차가 조금 달라도 채우고, 모르면 공란. KOFIA 거래량은 발행액이 아니다)
+        #  1) 발행일·만기가 맞는 회차(휴일로 며칠 밀린 것 포함)  2) 발행일만 같은 회차  3) 없으면 C·E 공란
+        series = (nice["series"] or kis["series"] or nice.get("loose") or kis.get("loose") or [])
         notes = []
         if series:
             # 같은 날·같은 만기 회차가 여럿이면(예: 2-1, 2-2) 장부처럼 첫 회차 한 줄로 쓰고 비고에 남긴다
@@ -154,24 +156,11 @@ class Builder:
             v["C"] = f"제{s0['series']}회차"
             v["E"] = int(s0["amount"]) if float(s0["amount"]).is_integer() else round(s0["amount"], 2)
             others = list(dict.fromkeys(s["series"] for s in series[1:] if s["series"] != s0["series"]))
-            if others:
+            if others and (nice["series"] or kis["series"]):
                 notes.append("같은 만기 회차 함께 발행: " + ", ".join(f"제{x}회차" for x in others))
         else:
-            amt = trades.loc[trades["trade_type"] == "매출", "amount"].sum() or trades["amount"].sum()
-            v["C"], v["E"] = None, round(float(amt) / 100, 2)
-            chk["C"] = "이번 회차 평가 문서를 못 찾음"
-            # 차환 발행은 회차별 평가 문서가 없는 경우가 많다 -> 직전 회차가 '제N회차'면 N+1로 추정(노란색 유지)
-            pm = re.fullmatch(r"제(\d+)회차", str(prior.values.get("C") or "")) if prior else None
-            if pm:
-                v["C"] = f"제{int(pm.group(1)) + 1}회차"
-                chk["C"] = f"평가 문서 없음, 직전 회차({prior.values['C']})+1로 추정"
-            loose = nice.get("loose") or kis.get("loose")
-            if loose:
-                # 발행일이 같은 예정 회차가 있다(만기만 다름: 월 단위 예정 회차를 묶어 발행 등) -> 그 회차로
-                v["C"] = f"제{loose[0]['series']}회차"
-                chk["C"] = (f"평가 문서의 예정 회차표와 만기가 다름(예정 {loose[0]['maturity']}), "
-                            "발행일이 같은 회차로 채움")
-            chk["E"] = "KOFIA 거래량으로 추정"
+            v["C"] = v["E"] = None
+            notes.append("평가 문서에 이번 발행 회차가 없어 회차·발행액 공란")
         # D
         if prior and prior.values.get("D"):
             v["D"] = prior.values["D"]
