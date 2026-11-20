@@ -157,6 +157,8 @@ def main():
         save_json(HIST, dict(sorted(hist.items())))
         table.save()
         builder = Builder(table)      # 새로 알게 된 SPC·시공사 반영
+    if getattr(builder.ev, "_kr_down", ""):
+        errors.append(builder.ev._kr_down)
     if not nice_ok:
         errors.append(agencies.NICE_OFF + ". NICE가 필요한 줄은 노란색으로 남고, PC 보충 실행이나 다음 실행 때 채워집니다.")
     left = failed_days(hist)

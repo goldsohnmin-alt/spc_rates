@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 import time
 
@@ -48,6 +49,9 @@ def probe_nice() -> bool:
     """NICE에 딱 한 번 접속해 본다(재시도 없음). 막혀 있으면 이번 실행에서는 NICE를 묻지 않는다.
     GitHub 서버가 NICE에 막혔을 때(2026-11-19) 계속 두드리면 차단이 길어질 수 있어서다."""
     global NICE_OFF
+    if os.environ.get("NICE") == "off":      # 비교 시험: NICE 없이 만들어 본다
+        NICE_OFF = "NICE를 쓰지 않도록 설정됨(NICE=off)"
+        return False
     try:
         r = requests.get(Nice.URL, params={"searchType": "cmpNmCheck", "searchText": "제일차"}, headers=UA, timeout=20)
         r.raise_for_status()

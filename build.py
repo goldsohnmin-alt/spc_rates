@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from evidence import Evidence
+from evidence import SOURCES, Evidence
 from rates import norm_spc, rate_range
 
 # 평가사 표기 -> 장부 표기
@@ -84,14 +84,13 @@ class Builder:
                 hits.append((t.find(b), form))
         return min(hits)[1] if hits else None
 
-    def _nice_says_no(self, res: dict) -> bool:
-        """NICE 문서만으로 '아니오'가 분명한가(그러면 한신평은 묻지 않는다).
-        NICE 조회에 실패했거나 근거 문서가 없거나 시공사가 보이면 False(한신평도 본다)."""
-        if res["errors"]:
+    def _says_no(self, res: dict) -> bool:
+        """지금까지 본 평가사 문서만으로 '아니오'가 분명한가(그러면 남은 평가사는 묻지 않는다).
+        근거 문서가 없거나 시공사가 보이면 False(다음 평가사도 본다)."""
+        docs = _judge_docs([res[s] for s in SOURCES])
+        if not docs or not all(d.get("factors") for d in docs):
             return False
-        d = res["nice"]["match"] or res["nice"]["latest"]
-        if not d or not d.get("factors"):
-            return False
+        d = {"factors": [f for x in docs for f in x["factors"]], "builder": docs[0].get("builder")}
         text = " / ".join(d["factors"])
         if any(w in text for w in EXCLUDE_WORDS):
             return True
@@ -127,14 +126,10 @@ class Builder:
         prior = self.led.autofill(led_name, before_row) if led_name else None
         prior = prior if prior and prior.found else None
 
-        ev = self.ev.for_issue(name, kind, F, G, skip_kis=self._nice_says_no)
-        nice, kis = ev["nice"], ev["kis"]
-        docs = [d for d in (nice["match"], kis["match"]) if d]
-        if not docs:
-            # 회차가 맞는 문서가 없으면 두 평가사 중 '가장 최근' 문서 하나만 쓴다.
-            # (옛 문서의 신용공여자가 지금과 다를 수 있다: 2026-03 포스코이앤씨 -> 2026-09 건설공제조합 사례)
-            latest = [d for d in (nice["latest"], kis["latest"]) if d]
-            docs = sorted(latest, key=lambda d: d["doc_date"], reverse=True)[:1]
+        ev = self.ev.for_issue(name, kind, F, G, skip_kis=self._says_no)
+        S = [ev[s] for s in SOURCES]          # NICE, 한기평, 한신평 순서
+        kis = ev["kis"]
+        docs = _judge_docs(S)
         factors = [f for d in docs for f in d.get("factors", [])]
         site_builders = [d.get("builder") for d in docs] + [r.get("시공사") for r in ev["nice_table"]
                                                             if isinstance(r.get("시공사"), str)]
@@ -164,7 +159,8 @@ class Builder:
         # C·E: 회차·발행금액(이번 회차 문서)
         # C·E: 평가 문서 회차표에서(사용자 2026-11-19: 회차가 조금 달라도 채우고, 모르면 공란. KOFIA 거래량은 발행액이 아니다)
         #  1) 발행일·만기가 맞는 회차(휴일로 며칠 밀린 것 포함)  2) 발행일만 같은 회차  3) 없으면 C·E 공란
-        series = (nice["series"] or kis["series"] or nice.get("loose") or kis.get("loose") or [])
+        exact = next((r["series"] for r in S if r["series"]), None)
+        series = exact or next((r["loose"] for r in S if r.get("loose")), None) or []
         notes = []
         if series:
             # 같은 날·같은 만기 회차가 여럿이면(예: 2-1, 2-2) 장부처럼 첫 회차 한 줄로 쓰고 비고에 남긴다
@@ -172,7 +168,7 @@ class Builder:
             v["C"] = f"제{s0['series']}회차"
             v["E"] = int(s0["amount"]) if float(s0["amount"]).is_integer() else round(s0["amount"], 2)
             others = list(dict.fromkeys(s["series"] for s in series[1:] if s["series"] != s0["series"]))
-            if others and (nice["series"] or kis["series"]):
+            if others and exact:
                 notes.append("같은 만기 회차 함께 발행: " + ", ".join(f"제{x}회차" for x in others))
         else:
             v["C"] = v["E"] = None
@@ -188,7 +184,7 @@ class Builder:
         v["F"], v["G"] = F, G
         v["H"] = days_between(F, G)
         # I: 이번 회차 문서의 주관회사(NICE 우선)
-        arr = [d.get("arranger") for d in (nice["match"], kis["match"], nice["latest"], kis["latest"]) if d]
+        arr = [d.get("arranger") for d in [r["match"] for r in S] + [r["latest"] for r in S] if d]
         v["I"] = self.ledger_arranger(next((a for a in arr if a), None))
         if not v["I"] and prior:
             v["I"] = prior.values["I"]
@@ -204,8 +200,7 @@ class Builder:
         # K: 이번 회차 평가등급(평가사) -> 없으면 KOFIA 등급. KOFIA 등급 열은 가끔 틀린다(2026-09-14 A2- 사례)
         rt = trades["rating"].dropna().astype(str)
         k_kofia = re.sub(r"\s*\(sf\)\s*", "", rt.mode().iloc[0]) if len(rt) else None
-        k_agency = [s["rating"] for s in (nice["series"] or nice.get("loose") or [])
-                    + (kis["series"] or kis.get("loose") or [])]
+        k_agency = [s["rating"] for r in S for s in (r["series"] or r.get("loose") or [])]
         v["K"] = k_agency[0] if k_agency else k_kofia
         if not v["K"]:
             chk["K"] = "등급 없음"
@@ -227,9 +222,11 @@ class Builder:
         if prior_p:
             v["O"], v["P"] = prior.values["O"], prior_p
         else:
-            v["O"] = site_text(nice, kis, v["D"])
-            kis_f = [f for d in (kis["match"] or kis["latest"],) if d for f in d.get("factors", [])]
-            v["P"] = credit_text(kis_f + factors, builder)
+            v["O"] = site_text(S, v["D"])
+            # 신용보강 문장: 한신평 -> 한기평 -> NICE 순(장부 문체와 가까운 순)
+            pref = [ev["kis"], ev["kr"], ev["nice"]]
+            pf = [f for r in pref for d in (r["match"] or r["latest"],) if d for f in d.get("factors", [])]
+            v["P"] = credit_text(pf + factors, builder)
             if not v["O"]:
                 chk["O"] = "사업지를 찾지 못함"
         if reason.startswith("평가사 문서 없음"):
@@ -241,8 +238,9 @@ class Builder:
                    "NICE·한신평에 이번 발행의 평가 문서가 없음(한기평·서울신용평가만 평가했거나 아직 공시 전일 수 있음)")
             chk["J"] = why
             notes.insert(0, why)
-        if ev["errors"]:
-            notes += ev["errors"]
+        # 평가사 조회 실패는 판정을 못 했거나 회차를 못 찾았을 때만 비고에 남긴다(그때만 다시 조회할 가치가 있다)
+        if ev["errors"] and (verdict == "확인 필요" or not v.get("C")):
+            notes += list(dict.fromkeys(ev["errors"]))
         v["Q"] = "; ".join(notes) or None
         return o
 
@@ -272,8 +270,18 @@ def asset_type(docs) -> str | None:
     return None
 
 
-def site_text(nice: dict, kis: dict, d_value: str | None) -> str | None:
-    for d in (nice["match"], nice["latest"], kis["match"], kis["latest"]):
+def _judge_docs(S: list[dict]) -> list[dict]:
+    """판정에 쓸 문서: 회차가 맞는 문서들. 없으면 평가사들 중 '가장 최근' 문서 하나만.
+    (옛 문서의 신용공여자가 지금과 다를 수 있다: 2026-03 포스코이앤씨 -> 2026-09 건설공제조합 사례)"""
+    docs = [r["match"] for r in S if r["match"]]
+    if not docs:
+        latest = [r["latest"] for r in S if r["latest"]]
+        docs = sorted(latest, key=lambda d: d["doc_date"], reverse=True)[:1]
+    return docs
+
+
+def site_text(S: list[dict], d_value: str | None) -> str | None:
+    for d in [x for r in S for x in (r["match"], r["latest"])]:
         if d and d.get("site"):
             return d["site"]
     if d_value and d_value != "PF Loan":

@@ -2,6 +2,9 @@
 
 - NICE: 회사명 검색 표(시공사·신용도연계기관) + 의견서 PDF.
 - 한신평: Rating Summary PDF.
+- 한기평: 등급공시(자산유동화증권) 목록 + 평가의견 PDF(무료). 빠르게 받으면 막히므로 5초 간격(kr.py).
+  날짜 구간 목록을 한 번 받아 두고(디스크 저장) SPC 이름으로 골라 쓴다.
+- 조회 순서: NICE -> 한기평 -> 한신평. 앞 평가사 문서만으로 '아니오'가 분명하면 뒤 평가사는 묻지 않는다.
 - 발행일 이전(당일 포함) 문서 중 최신 순으로 몇 개를 읽어, 회차 표에 '발행일·만기일'이 같은 줄이 있는 문서를 고른다.
   없으면 가장 최신 문서를 '회차 불명'으로 돌려준다(판정·주관회사·사업지에는 쓸 수 있음).
 - 받은 PDF와 읽은 결과는 output/pdf/ 아래에 저장해 다시 받지 않는다(커밋 안 됨).
@@ -16,13 +19,24 @@ import re
 import requests
 
 import kis_pdf
+import kr_pdf
 import nice_pdf
 from agencies import Kis, Nice
+from kr import Kr
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 PDF_DIR = os.path.join(BASE, "output", "pdf")
 LIST_CACHE = os.path.join(PDF_DIR, "listings.json")
 MAX_DOCS = 4   # 출처별로 발행일 이전 문서를 최대 몇 개까지 읽을지
+SOURCES = ("nice", "kr", "kis")
+# 한기평은 USE_KR=1 일 때만 묻는다(2026-11-20: GitHub 비교 시험으로 확인한 뒤 매일 실행에 켤 예정)
+USE_KR = os.environ.get("USE_KR") == "1"
+
+
+def active_sources() -> tuple[str, ...]:
+    return tuple(s for s in SOURCES if s != "kr" or USE_KR)
+KR_PAUSE = 5.0   # 한기평 요청 간격(초). 2026-11-20 시험: 2초 간격까지 64건 무사, 1초 간격에서 막힘(429)
+KR_BACK, KR_AHEAD = 120, 30   # 발행일 기준 앞 120일 ~ 뒤 30일 평가 공시를 본다
 
 
 def _ymd(d) -> str:
@@ -55,10 +69,11 @@ def _match(p: dict, kind: str, f: str, g: str):
 
 class Evidence:
     def __init__(self):
-        self._nice = self._kis = None
+        self._nice = self._kis = self._kr = None
         self._list_cache: dict = {}
-        os.makedirs(os.path.join(PDF_DIR, "nice"), exist_ok=True)
-        os.makedirs(os.path.join(PDF_DIR, "kis"), exist_ok=True)
+        self._kr_chunks: dict = {}
+        for src in SOURCES:
+            os.makedirs(os.path.join(PDF_DIR, src), exist_ok=True)
 
     # ---- 출처별 문서 목록 -------------------------------------------------
     @property
@@ -73,6 +88,40 @@ class Evidence:
             self._kis = Kis()
         return self._kis
 
+    @property
+    def kr(self) -> Kr:
+        if self._kr is None:
+            self._kr = Kr(pause=KR_PAUSE)
+        return self._kr
+
+    def _kr_rows(self, f: str) -> list[dict]:
+        """발행일 f 앞뒤 구간의 한기평 자산유동화증권 등급공시 목록(30일 단위로 받아 디스크에 저장)."""
+        today = dt.date.today()
+        start, end = dt.date.fromisoformat(_plus(f, -KR_BACK)), min(dt.date.fromisoformat(_plus(f, KR_AHEAD)), today)
+        rows = []
+        a = dt.date(start.year, start.month, 1)
+        while a <= end:
+            b = (a.replace(day=28) + dt.timedelta(4)).replace(day=1) - dt.timedelta(1)   # 그 달 말일
+            key = a.isoformat()
+            if key not in self._kr_chunks:
+                path = os.path.join(PDF_DIR, "kr", f"list_{a:%Y%m}.json")
+                data = None
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8") as fh:
+                        data = json.load(fh)
+                    # 지난달 이전 목록은 그대로 쓰고, 이번 달·지난달 목록은 오늘 받은 것만 쓴다
+                    if b >= today - dt.timedelta(35) and data.get("fetched") != today.isoformat():
+                        data = None
+                if data is None:
+                    got = self.kr.listing(a.isoformat(), min(b, today).isoformat())
+                    data = {"fetched": today.isoformat(), "rows": got}
+                    with open(path, "w", encoding="utf-8") as fh:
+                        json.dump(data, fh, ensure_ascii=False)
+                self._kr_chunks[key] = data["rows"]
+            rows += self._kr_chunks[key]
+            a = b + dt.timedelta(1)
+        return rows
+
     def listing(self, spc: str, sources=("nice", "kis")) -> dict:
         """{'nice_table': [행...], 'docs': [{src, id, date, ...}], 'errors': [...]} - sources 의 평가사만 묻는다.
         출처별로 따로 기억하므로(실행 안 + 오늘 받은 것은 디스크) 나중에 다른 출처를 더 물어도 다시 받지 않는다."""
@@ -82,6 +131,23 @@ class Evidence:
             out["nice_table"] += part.get("nice_table", [])
             out["docs"] += part["docs"]
             out["errors"] += part["errors"]
+        return out
+
+    def _listing_kr(self, spc: str, f: str) -> dict:
+        out = {"nice_table": [], "docs": [], "errors": []}
+        if getattr(self, "_kr_down", ""):      # 이번 실행에서 이미 막힘 -> 더 두드리지 않는다(차단이 길어진다)
+            out["errors"].append(self._kr_down)
+            return out
+        try:
+            seen = set()
+            for r in self._kr_rows(f):
+                fid = r.get("RTNG_OPN_FILE_NM")
+                if fid and fid not in seen and re.sub(r"\s+|\(주\)|㈜|\(유\)", "", r.get("COMP_NM", "")) ==                         re.sub(r"\s+|\(주\)|㈜|\(유\)", "", spc):
+                    seen.add(fid)
+                    out["docs"].append(dict(src="kr", id=fid, date=r["EVAL_DT"].replace(".", "-"), row=r))
+        except Exception as e:
+            self._kr_down = f"한기평 조회 실패(이번 실행에서는 한기평 건너뜀): {str(e)[:80]}"
+            out["errors"].append(self._kr_down)
         return out
 
     def _listing_src(self, spc: str, src: str) -> dict:
@@ -138,11 +204,20 @@ class Evidence:
             with open(js, encoding="utf-8") as f:
                 return json.load(f)
         if not os.path.exists(pdf):
-            ok = (self.nice.download(doc["id"], pdf) if src == "nice"
-                  else self.kis.download(doc["item"], pdf))
+            if src == "kr" and getattr(self, "_kr_down", ""):
+                return None
+            try:
+                ok = (self.nice.download(doc["id"], pdf) if src == "nice"
+                      else self.kr.download(doc["row"], pdf) if src == "kr"
+                      else self.kis.download(doc["item"], pdf))
+            except requests.RequestException as e:
+                if src == "kr":
+                    self._kr_down = f"한기평 조회 실패(이번 실행에서는 한기평 건너뜀): {str(e)[:80]}"
+                raise
             if not ok:
                 return None
         parsed = (nice_pdf.parse(nice_pdf.read_text(pdf)) if src == "nice"
+                  else kr_pdf.parse(kr_pdf.read_text(pdf, 2)) if src == "kr"
                   else kis_pdf.parse(kis_pdf.read_text(pdf)))
         parsed.update(src=src, doc_id=doc["id"], doc_date=doc["date"])
         with open(js, "w", encoding="utf-8") as f:
@@ -168,12 +243,14 @@ class Evidence:
         """
         f, g = _ymd(issue), _ymd(maturity)
         empty = {"match": None, "series": None, "latest": None, "loose": None}
-        res = {"nice_table": [], "errors": [], "nice": dict(empty), "kis": dict(empty), "kis_skipped": False}
-        for src in ("nice", "kis"):
-            if src == "kis" and skip_kis and skip_kis(res):
-                res["kis_skipped"] = True
+        res = {"nice_table": [], "errors": [], "skipped": []}
+        res.update({src: dict(empty) for src in SOURCES})
+        active = active_sources()
+        for i, src in enumerate(active):
+            if i and skip_kis and skip_kis(res):     # 앞 평가사 문서만으로 '아니오'가 분명 -> 남은 평가사 생략
+                res["skipped"] = list(active[i:])
                 break
-            lst = self.listing(spc, (src,))
+            lst = self._listing_kr(spc, f) if src == "kr" else self.listing(spc, (src,))
             res["nice_table"] += lst["nice_table"]
             res["errors"] += lst["errors"]
             docs = sorted((d for d in lst["docs"] if d["src"] == src and d["date"] <= f),
