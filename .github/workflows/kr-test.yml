@@ -1,0 +1,17 @@
+name: kr-access-test
+# GitHub 서버에서 한기평 접속이 되는지 한 번 확인하는 시험용(수동 실행만). 아무것도 커밋하지 않는다.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - run: python kr_probe.py
