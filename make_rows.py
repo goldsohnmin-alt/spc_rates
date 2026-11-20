@@ -35,6 +35,20 @@ def quick_no(issue, trades) -> str | None:
     return None
 
 
+# 이번 실행에서 NICE를 못 물어 줄을 내지 않은 SPC: {발행일: [SPC 이름]} (run_daily 가 state/nice_wait.json 에 모은다)
+NICE_WAIT: dict[str, list[str]] = {}
+
+
+def nice_only_missing(q: str | None) -> bool:
+    """비고의 조회 실패가 'NICE를 일부러 안 물은 것'뿐인가(한기평·한신평 조회는 정상)."""
+    import agencies
+    if not agencies.NICE_OFF or not q:
+        return False
+    # '평가사 사이트 조회 실패로 판정 못 함'은 안내 문장이라 빼고, 실제 출처별 실패 문장만 본다
+    fails = [x for x in q.split("; ") if "조회 실패" in x and not x.startswith("평가사 사이트")]
+    return bool(fails) and all(x.lower().startswith("nice") for x in fails)
+
+
 def business_days(a: dt.date, b: dt.date) -> list[dt.date]:
     return [a + dt.timedelta(n) for n in range((b - a).days + 1) if (a + dt.timedelta(n)).weekday() < 5]
 
@@ -67,6 +81,13 @@ def make(days: list[dt.date], builder: Builder | None = None, db: SpcDb | None =
             if o.verdict == "아니오":
                 continue
             if o.values.get("M") == "-":     # 그날 매출·매입 거래가 없으면 줄을 내지 않는다(사용자 2026-11-19)
+                continue
+            if o.verdict == "확인 필요" and nice_only_missing(o.values.get("Q")):
+                # NICE를 못 물어 판정 못 한 건(한기평·한신평에는 문서 없음): 줄을 내지 않고 'NICE 확인 대기'로 적어 둔다.
+                # NICE가 열리는 실행(PC 보충 실행)이 그 날짜를 다시 만든다(사용자 2026-11-20).
+                NICE_WAIT.setdefault(d.isoformat(), [])
+                if i["name"] not in NICE_WAIT[d.isoformat()]:
+                    NICE_WAIT[d.isoformat()].append(i["name"])
                 continue
             if o.verdict == "확인 필요" and "조회 실패" not in (o.values.get("Q") or ""):
                 # NICE·한신평 어디에도 평가 문서가 없는 건도 내지 않는다(사용자 2026-11-19).

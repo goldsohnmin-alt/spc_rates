@@ -24,6 +24,7 @@ import traceback
 
 import agencies
 from build import Builder
+import make_rows
 from make_rows import make
 from spc_db import SpcDb
 from spc_table import SpcTable
@@ -32,6 +33,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DOCS = os.path.join(BASE, "docs")
 HIST = os.path.join(DOCS, "history.json")
 DATA = os.path.join(DOCS, "data.json")
+WAIT = os.path.join(BASE, "state", "nice_wait.json")   # NICE 확인 대기 {발행일: [SPC]} (커밋한다)
 KST = dt.timezone(dt.timedelta(hours=9))
 
 
@@ -57,7 +59,10 @@ def clean(v):
     if isinstance(v, (dt.date, dt.datetime)):
         return v.isoformat()[:10]
     if hasattr(v, "item"):          # numpy 숫자
-        return v.item()
+        v = v.item()
+    # 빈칸이 섞인 열은 pandas 가 정수를 실수로 바꾼다(1012 -> 1012.0). 정수면 정수로 되돌린다
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
     return v
 
 
@@ -84,7 +89,9 @@ def failed_days(hist: dict, nice_ok: bool = True) -> list[dt.date]:
         if not nice_ok:
             return "한신평 조회 실패" in q or "kis PDF 조회 실패" in q
         return "조회 실패" in q or (d >= recent and r.get("verdict") == "확인 필요")
-    bad = [d for d, rows in hist.items() if any(need(d, r) for r in rows)]
+    bad = {d for d, rows in hist.items() if any(need(d, r) for r in rows)}
+    if nice_ok:      # NICE가 열려 있으면 'NICE 확인 대기' 날짜도 다시 만든다
+        bad |= set(load_json(WAIT, {}))
     return [dt.date.fromisoformat(d) for d in sorted(bad, reverse=True)]
 
 
@@ -153,6 +160,11 @@ def main():
             if r["verdict"] == "예":
                 table.update(rec)
         hist[d.isoformat()] = rows
+        wait = load_json(WAIT, {})
+        wait.pop(d.isoformat(), None)            # 이 날짜를 다시 만들었으니 예전 대기 목록은 지운다
+        if make_rows.NICE_WAIT.get(d.isoformat()):
+            wait[d.isoformat()] = make_rows.NICE_WAIT[d.isoformat()]
+        save_json(WAIT, dict(sorted(wait.items())))
         # 날짜마다 저장(중간에 끊겨도 앞 날짜는 남는다)
         save_json(HIST, dict(sorted(hist.items())))
         table.save()
@@ -161,7 +173,12 @@ def main():
         errors.append(builder.ev._kr_down)
     if not nice_ok:
         errors.append(agencies.NICE_OFF + ". NICE가 필요한 줄은 노란색으로 남고, PC 보충 실행이나 다음 실행 때 채워집니다.")
-    left = failed_days(hist)
+    waiting = load_json(WAIT, {})
+    if waiting:
+        n = sum(map(len, waiting.values()))
+        errors.append(f"NICE 확인 대기 {n}건({len(waiting)}일): 한기평·한신평에 평가 문서가 없어 NICE로만 판정할 수 있는 SPC입니다. "
+                      "줄은 만들지 않았고, PC 보충 실행 때 NICE로 확인해 시공사 건이면 줄을 넣습니다.")
+    left = [d for d in failed_days(hist) if d.isoformat() not in waiting]   # 대기 날짜는 위에서 따로 알렸다
     if left:
         errors.append(f"평가사를 다시 조회할 날짜 {len(left)}일(조회 실패 또는 최근 평가 문서 없음). "
                       f"다음 실행 때 하루 최대 {os.environ.get('REDO_DAYS', '5')}일씩 자동으로 다시 조회합니다.")

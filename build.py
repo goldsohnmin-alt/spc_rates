@@ -177,7 +177,8 @@ class Builder:
         if prior and prior.values.get("D"):
             v["D"] = prior.values["D"]
         else:
-            v["D"] = asset_type(docs)
+            # 유형 이름은 한신평 표기가 장부와 같다(2026-11-20 비교 시험: 한기평은 같은 건을 'CDO 유동화' 등으로 다르게 부름)
+            v["D"] = asset_type(sorted(docs, key=lambda d: d.get("src") != "kis"))
             if not v["D"]:
                 chk["D"] = "유동화 유형 확인 필요"
         # F·G·H

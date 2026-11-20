@@ -67,6 +67,9 @@ def main():
                     lines.append(f"- {d} 노란색 새로 생김 {k[0]}: {', '.join(T[k]['checks'])} 열")
     out.append(f"- 똑같음 {tot['same']}줄, 값 다름 {tot['diff']}줄, 빠짐 {tot['missing']}줄, 더 생김 {tot['extra']}줄")
     out.append(f"- 노란 줄: 정답 {tot['yellow_ans']}줄 / 시험 {tot['yellow_test']}줄")
+    import make_rows
+    wait = sum(len(v) for d, v in make_rows.NICE_WAIT.items() if a <= d <= b)
+    out.append(f"- NICE 확인 대기(줄 안 만듦, PC가 나중에 확인): {wait}건")
     out.append("")
     out += lines or ["차이 없음"]
     text = "\n".join(out)

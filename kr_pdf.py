@@ -42,12 +42,14 @@ def parse(text: str) -> dict:
         out["series"].append(dict(kind=m.group(2), series=m.group(1), amount=amt,
                                   issue=m.group(5).replace(".", "-"), maturity=m.group(6).replace(".", "-"),
                                   rating=m.group(7)))
-    m = re.search(r"주요\s*평정\s*요인\s*(.*?)(?=\n\s*■|\n\s*\n|\Z)", text, re.S)
-    if m:
-        block = join_lines(m.group(1))
-        # 글머리표가 깨진 글자( 등 사용자 정의 영역)로 오기도 한다
-        parts = [p.strip() for p in re.split(r"\s*[•▪·-]\s*", block) if p.strip()]
-        out["factors"] = parts
+    # 평정논거 칸은 두 칸 배치라 글자가 '주요평정요인' 앞뒤로 흩어져 나온다(2026-11-20 케이비제기제일차·
+    # 케이아이에스안심제십삼차: 요인 문장 중간에 '주요평정요인'이 끼어 듦). '평정논거'부터 '■'나 쪽 끝까지 모은다.
+    m = re.search(r"평정\s*논거(?:\s*\(Key Rating Rationale\))?(.*?)(?=■|www\.korearatings\.com|\Z)", text, re.S)
+    if m and "주요평정요인" in re.sub(r"\s+", "", m.group(1)):
+        block = join_lines(re.sub(r"주요\s*평정\s*요인", " ", m.group(1)))
+        # 글머리표는 깨진 글자(사용자 정의 영역, 예: U+F0A7)나 •▪ 로 온다
+        parts = [p.strip() for p in re.split("[•▪\ue000-\uf8ff]", block) if p.strip()]
+        out["factors"] = [re.sub(r"\s+", " ", p) for p in parts]
     m = re.search(r"주관회사\s+(\S+)", text)
     if m:
         out["arranger"] = m.group(1)
