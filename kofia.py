@@ -142,11 +142,24 @@ def _cache_path(kind, d: dt.date):
     return os.path.join(CACHE_DIR, f"{kind}_{d:%Y%m%d}.csv")
 
 
+def _has_cache(kind, d: dt.date) -> bool:
+    """저장된 결과가 있고 0줄이 아닌가(머리글만 있는 파일은 없는 것으로 본다)."""
+    path = _cache_path(kind, d)
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        return sum(1 for _ in f) > 1
+
+
 def fetch_day(driver, kind: str, d: dt.date) -> pd.DataFrame:
     """그날 거래일 기준 전체 거래(모든 회사)를 DataFrame으로. amount 단위는 백만원, rate 는 %."""
     path = _cache_path(kind, d)
     if os.path.exists(path):
-        return pd.read_csv(path, dtype=str).pipe(_types, kind)
+        cached = pd.read_csv(path, dtype=str)
+        if len(cached):
+            return cached.pipe(_types, kind)
+        # 예전 코드가 덜 불러온 화면(0줄)을 저장한 파일: 버리고 다시 받는다(2026-11-22 10/27·10/30 ABCP 누락 사례)
+        os.remove(path)
     s = SCREENS[kind]
     ymd = d.strftime("%Y%m%d")
     last_err = None
@@ -199,7 +212,7 @@ def _types(df: pd.DataFrame, kind: str) -> pd.DataFrame:
 def fetch_days(dates, kinds=("ABSTB", "ABCP"), driver=None) -> pd.DataFrame:
     own = driver is None
     if own:
-        need = [(k, d) for d in dates for k in kinds if not os.path.exists(_cache_path(k, d))]
+        need = [(k, d) for d in dates for k in kinds if not _has_cache(k, d)]
         driver = make_driver() if need else None
     try:
         frames = [fetch_day(driver, k, d) for d in dates for k in kinds]

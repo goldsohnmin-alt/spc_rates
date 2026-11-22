@@ -63,12 +63,16 @@ def make(days: list[dt.date], builder: Builder | None = None, db: SpcDb | None =
     out = []
     for d in days:
         iss = issues_on(trades, d)
-        todo = [i for _, i in iss.iterrows() if not db.skip(i["spc"], today)]
+        # SPC 표에 있는(시공사 건이었던) SPC는 '아니오' 기록이 있어도 다시 본다
+        # (2026-11-22 모니모용산제이차: 옛 코드가 '아니오'로 적어 두어 11/04 줄이 빠짐)
+        known = lambda i: norm_spc(i["name"]) in builder.led_names
+        skip = lambda i: db.skip(i["spc"], today) and not known(i)
+        todo = [i for _, i in iss.iterrows() if not skip(i)]
         print(f"{d}: 발행 {len(iss)}건, 평가사 확인 {len(todo)}건 (나머지는 이미 '아니오'로 분류된 SPC)", flush=True)
         for n, i in enumerate(todo, 1):
             if n % 10 == 0:
                 print(f"  {n}/{len(todo)}", flush=True)
-            if db.skip(i["spc"], today):     # 같은 날 앞 회차에서 이미 '아니오'로 판정된 SPC면 바로 넘어간다
+            if skip(i):     # 같은 날 앞 회차에서 이미 '아니오'로 판정된 SPC면 바로 넘어간다
                 continue
             t = trades[(trades["kind"] == i["kind"]) & (trades["trade_date"] == d) & (trades["issue_date"] == d)
                        & (trades["maturity"] == i["maturity"]) & (trades["name"].map(norm_spc) == i["spc"])]

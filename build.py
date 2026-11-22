@@ -87,6 +87,10 @@ class Builder:
     def _says_no(self, res: dict) -> bool:
         """지금까지 본 평가사 문서만으로 '아니오'가 분명한가(그러면 남은 평가사는 묻지 않는다).
         근거 문서가 없거나 시공사가 보이면 False(다음 평가사도 본다)."""
+        if norm_spc(res.get("spc") or "") in self.led_names:
+            # SPC 표에 있는(시공사 건이었던) SPC는 끝까지 다 본다. 평가사마다 근거를 따로 적기도 한다
+            # (2026-11-04 모니모용산제이차: 한기평 문서엔 삼성증권만, 한신평 문서엔 현대건설도)
+            return False
         docs = _judge_docs([res[s] for s in SOURCES])
         if not docs or not all(d.get("factors") for d in docs):
             return False
@@ -177,8 +181,8 @@ class Builder:
         if prior and prior.values.get("D"):
             v["D"] = prior.values["D"]
         else:
-            # 유형 이름은 한신평 표기가 장부와 같다(2026-11-20 비교 시험: 한기평은 같은 건을 'CDO 유동화' 등으로 다르게 부름)
-            v["D"] = asset_type(sorted(docs, key=lambda d: d.get("src") != "kis"))
+            # 유형 이름은 NICE -> 한신평 -> 한기평 순(장부 값은 NICE 표기를 따라 왔다. 2026-11-22 비교 시험)
+            v["D"] = asset_type(sorted(docs, key=lambda d: {"nice": 0, "kis": 1}.get(d.get("src"), 2)))
             if not v["D"]:
                 chk["D"] = "유동화 유형 확인 필요"
         # F·G·H

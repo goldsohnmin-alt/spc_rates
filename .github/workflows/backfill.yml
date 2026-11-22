@@ -30,6 +30,7 @@ jobs:
           BACKFILL_DAYS: ${{ github.event.inputs.days || '5' }}
           BACKFILL_FROM: "2024-11-18"
           RUN_MINUTES: "300"   # 이 시간이 지나면 새 날짜를 시작하지 않고 저장·커밋
+          USE_KR: "1"          # 한기평도 조회(NICE가 GitHub 서버를 막아서. 2026-11-22 비교 시험 뒤 켬)
         run: python run_daily.py
       - name: Commit results
         run: |

@@ -24,6 +24,14 @@ DB = os.path.join(BASE, "state", "spc_db.csv")
 COLS = "BCDEFGHIJKOP"     # 비교할 열(A는 줄 찾는 열쇠, L~N 금리는 KOFIA라 평가사와 무관)
 
 
+def same(x, y) -> bool:
+    """150 과 150.0 은 같은 값으로 본다."""
+    try:
+        return float(x) == float(y)
+    except (TypeError, ValueError):
+        return str(x or "") == str(y or "")
+
+
 def key(r):
     return (r["A"], r["F"], r["G"])
 
@@ -56,7 +64,7 @@ def main():
                 tot["extra"] += 1
                 lines.append(f"- {d} **더 생김**: {k[0]} (시험 판정 {T[k].get('verdict')})")
             else:
-                bad = [c for c in COLS if str(A[k].get(c) or "") != str(T[k].get(c) or "")]
+                bad = [c for c in COLS if not same(A[k].get(c), T[k].get(c))]
                 if bad:
                     tot["diff"] += 1
                     lines.append(f"- {d} **값 다름** {k[0]}:")

@@ -56,8 +56,16 @@ def _match(p: dict, kind: str, f: str, g: str):
     - 발행일 같고 만기가 4일 이내 차이: 같은 회차(예정 만기가 휴일이라 밀림)
     - 발행일·만기가 둘 다 4일 이내로 같이 밀림: 같은 회차(예정 발행일이 주말이라 밀림. 2026-10-12 에오스제일차)
     """
+    r = _match_kind(p, kind, f, g)
+    if not r[0] and not r[2]:
+        # 평가사가 종류를 다르게 적은 경우(2026-10-27 에이치엠시화제일차: KOFIA ABSTB, 한신평 ABCP) -> 종류 무시하고 한 번 더
+        r = _match_kind(p, None, f, g)
+    return r
+
+
+def _match_kind(p: dict, kind, f: str, g: str):
     F, G = dt.date.fromisoformat(f), dt.date.fromisoformat(g)
-    ser = [s for s in p.get("series", []) if s.get("kind") in (None, kind)]
+    ser = [s for s in p.get("series", []) if kind is None or s.get("kind") in (None, kind)]
     days = lambda a, b: abs((dt.date.fromisoformat(a) - b).days)
     same_day = [s for s in ser if s["issue"] == f]
     hit = [s for s in same_day if days(s["maturity"], G) <= 4]
@@ -243,7 +251,7 @@ class Evidence:
         """
         f, g = _ymd(issue), _ymd(maturity)
         empty = {"match": None, "series": None, "latest": None, "loose": None}
-        res = {"nice_table": [], "errors": [], "skipped": []}
+        res = {"nice_table": [], "errors": [], "skipped": [], "spc": spc}
         res.update({src: dict(empty) for src in SOURCES})
         active = active_sources()
         for i, src in enumerate(active):
