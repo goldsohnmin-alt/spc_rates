@@ -98,7 +98,12 @@ def failed_days(hist: dict, nice_ok: bool = True) -> list[dt.date]:
 def target_days(hist: dict, hol, nice_ok: bool = True) -> list[dt.date]:
     redo = int(os.environ.get("REDO_DAYS", "5") or 0)
     if os.environ.get("REDO_ONLY") == "1":      # PC 보충 실행: 다시 만들 날짜만
-        return failed_days(hist, nice_ok)[:redo]
+        days = failed_days(hist, nice_ok)[:redo]
+        # GitHub 밤 실행이 밀려 전 영업일이 아직 없으면 PC가 먼저 만든다
+        last = prev_bday(dt.datetime.now(KST).date(), hol)
+        if last.isoformat() not in hist and last not in days:
+            days.insert(0, last)
+        return days
     days = _target_days(hist, hol, nice_ok)
     extra = [d for d in failed_days(hist, nice_ok) if d not in days][:redo]
     return days + extra
@@ -171,9 +176,13 @@ def main():
         builder = Builder(table)      # 새로 알게 된 SPC·시공사 반영
     if getattr(builder.ev, "_kr_down", ""):
         errors.append(builder.ev._kr_down)
-    if not nice_ok:
-        errors.append(agencies.NICE_OFF + ". NICE가 필요한 줄은 노란색으로 남고, PC 보충 실행이나 다음 실행 때 채워집니다.")
     waiting = load_json(WAIT, {})
+    # NICE가 막혔다는 안내는 NICE가 필요한 노란 줄이 실제로 남았을 때만 띄운다
+    # (2026-11-23: PC 보충 실행이 다 채운 뒤 돈 GitHub 실행이 할 일 없이 이 문구만 다시 띄움)
+    nice_rows = sum(1 for rs in hist.values() for r in rs
+                    if any(x.lower().startswith("nice") and "조회 실패" in x for x in (r.get("Q") or "").split("; ")))
+    if not nice_ok and nice_rows:
+        errors.append(f"{agencies.NICE_OFF}. NICE가 필요한 노란 줄 {nice_rows}개는 PC 보충 실행이나 다음 실행 때 채워집니다.")
     if waiting:
         n = sum(map(len, waiting.values()))
         errors.append(f"NICE 확인 대기 {n}건({len(waiting)}일): 한기평·한신평에 평가 문서가 없어 NICE로만 판정할 수 있는 SPC입니다. "
