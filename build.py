@@ -225,6 +225,16 @@ class Builder:
                 and len(prior.values["P"]) <= 150 and len(prior.values["O"]) <= 200):
             prior_p = self.checked_credit(prior.values["P"], builder)
         if prior_p:
+            # 장부 문장이 평가 문서 문장과 한두 글자만 다르면 장부 오타로 보고 문서 문장으로 바꾼다
+            # (2026-11-24 뉴스타더그리드제일차: 장부 '작므보충' -> 문서 '자금보충')
+            docs_all = [d for r in S for d in (r["match"], r["latest"]) if d]
+            for f in (x for d in docs_all for x in d.get("factors", [])):
+                f = re.split(r"\s\d{1,2}\s", ju(f))[0].strip()
+                # 글자 수가 같은 것만(글자가 바뀐 오타). '연대보증' vs '연대보증 의무' 같은 장부 표현 차이는 그대로 둔다
+                if (len(bare(f)) == len(bare(prior_p)) >= 10
+                        and 0 < _edit_distance(bare(f), bare(prior_p)) <= 2):
+                    prior_p = f
+                    break
             v["O"], v["P"] = prior.values["O"], prior_p
         else:
             v["O"] = site_text(S, v["D"])
