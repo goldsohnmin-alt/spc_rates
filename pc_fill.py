@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import socket
 import time
 import urllib.request
 
@@ -23,6 +24,7 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 REPO = "goldsohnmin-alt/spc_rates"
 WAIT_MAX = 90      # 분
 POLL = 120         # 초
+NET_MAX = 60       # 분. 인터넷이 안 될 때 기다리는 최대 시간(작업 스케줄러 시간 제한 안에서)
 
 
 def log(*a):
@@ -46,25 +48,50 @@ def actions_running() -> bool:
                for x in runs)
 
 
+def online() -> bool:
+    """인터넷이 되는가(GitHub 주소를 찾고 접속까지 되는지 10초 안에 확인)."""
+    try:
+        socket.create_connection(("api.github.com", 443), timeout=10).close()
+        return True
+    except OSError:
+        return False
+
+
+def wait_online() -> bool:
+    """인터넷이 될 때까지 1분마다 다시 확인한다(최대 NET_MAX 분, PC가 잠든 시간도 포함).
+    2026-11-24: 로그인 직후 인터넷이 안 잡혀 'GitHub 실행 중'으로 잘못 알고 기다리다 끝난 일이 있었다."""
+    start = time.time()
+    while not online():
+        if time.time() - start >= NET_MAX * 60:
+            return False
+        log(f"인터넷 연결이 안 되어 1분 뒤 다시 확인합니다 ({int(time.time() - start) // 60}분)")
+        time.sleep(60)
+    if time.time() - start > 5:
+        log("인터넷이 연결되었습니다.")
+    return True
+
+
 def wait_for_actions() -> bool:
-    waited = 0
+    start = time.time()
     while True:
+        if not wait_online():
+            log(f"인터넷이 {NET_MAX}분 넘게 연결되지 않아 이번에는 건너뜁니다.")
+            return False
         try:
             if not actions_running():
                 return True
-        except Exception as e:      # 확인을 못 하면 안전하게 기다린다
+            log(f"GitHub 실행이 돌고 있어 기다립니다 ({int(time.time() - start) // 60}분)")
+        except Exception as e:      # 인터넷은 되는데 확인을 못 하면(GitHub 응답 문제) 안전하게 기다린다
             log("GitHub 실행 상태 확인 실패:", e)
-        if waited >= WAIT_MAX * 60:
+        if time.time() - start >= WAIT_MAX * 60:
+            log(f"GitHub 실행이 {WAIT_MAX}분 넘게 끝나지 않아 이번에는 건너뜁니다.")
             return False
-        log(f"GitHub 실행이 돌고 있어 기다립니다 ({waited // 60}분)")
         time.sleep(POLL)
-        waited += POLL
 
 
 def main() -> int:
     log("PC 보충 실행 시작")
     if not wait_for_actions():
-        log(f"GitHub 실행이 {WAIT_MAX}분 넘게 끝나지 않아 이번에는 건너뜁니다.")
         return 1
     git("pull", "--rebase", "--autostash", "-q")
 
