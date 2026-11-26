@@ -244,6 +244,8 @@ class Builder:
             v["P"] = credit_text(pf + factors, builder)
             if not v["O"]:
                 chk["O"] = "사업지를 찾지 못함"
+        if v.get("O"):   # 문서에서 온 겹친 공백 정리(2026-11-26 아델라제십차 '규모의  오피스텔')
+            v["O"] = re.sub(r"\s+", " ", v["O"]).strip()
         if reason.startswith("평가사 문서 없음"):
             # 이번 평가 문서가 없어 SPC 표(장부)의 옛 시공사로 채운 줄: 그사이 신용공여자가 바뀌었을 수 있다
             chk["J"] = "이번 평가 문서가 없어 예전 시공사로 채움(신용공여자 변경 여부 확인)"
