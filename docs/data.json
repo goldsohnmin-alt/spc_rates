@@ -1,5 +1,5 @@
 {
-"updated": "2026-11-27T09:52+09:00",
+"updated": "2026-11-28T08:48+09:00",
 "latest_date": "2026-11-26",
 "rows": [
 {
@@ -45,5 +45,11 @@
 "checks": {}
 }
 ],
-"errors": []
+"errors": [
+"2026-11-27 처리 실패: ReadTimeoutError: HTTPConnectionPool(host='localhost', port=60409): Read timed out. (read timeout=120)",
+"2026-08-21 처리 실패: ReadTimeoutError: HTTPConnectionPool(host='localhost', port=58959): Read timed out. (read timeout=120)",
+"2026-08-20 처리 실패: ReadTimeoutError: HTTPConnectionPool(host='localhost', port=44803): Read timed out. (read timeout=120)",
+"2026-08-19 처리 실패: ReadTimeoutError: HTTPConnectionPool(host='localhost', port=36631): Read timed out. (read timeout=120)",
+"2026-08-18 처리 실패: ReadTimeoutError: HTTPConnectionPool(host='localhost', port=43111): Read timed out. (read timeout=120)"
+]
 }
